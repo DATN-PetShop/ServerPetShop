@@ -121,7 +121,6 @@ const loginUser = async (req, res) => {
     // Generate token
     const token = generateToken(user._id);
 
-    // Return success response
     res.status(200).json({
       success: true,
       statusCode: 200,

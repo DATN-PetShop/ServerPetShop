@@ -3,6 +3,9 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const userRoutes = require('./src/routes/userRoutes');
+const petRoutes = require('./src/routes/petRoutes');
+const productRoutes = require('./src/routes/productRoutes');
+
 
 
 const app = express();
@@ -21,6 +24,16 @@ mongoose
   .catch((err) => console.error('MongoDB connection error:', err));
 
 app.use('/api/users', userRoutes);
+
+//pet
+app.use('/api/pets', petRoutes); 
+
+// product
+app.use('/api/products', productRoutes);
+
+
+
+
 
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
