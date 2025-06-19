@@ -1,20 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
+const requireRoles = require('../middleware/requireRole');
+const upload = require('../middleware/upload');
 const {
   createPet,
-  getMyPets,
+  getAllPetsPublic,
+  getAllPetsAdmin,
   updatePet,
   deletePet
 } = require('../controllers/petController');
-const requireRole = require('../middleware/requireRole');
 
-// user guest
-router.get('/', auth, getMyPets);            // lay danh sach
+router.get('/', getAllPetsPublic); // all role có thể xem
 
-//admin
-router.post('/', auth, requireRole(['Admin']), createPet); // them pet
-router.put('/:id', auth, requireRole(['Admin', 'Staff']), updatePet); // sua pet
-router.delete('/:id', auth, requireRole(['Admin']), deletePet); // xoa pet
+// xem alll thong tin 
+router.get('/admin', auth, requireRoles(['Admin']), getAllPetsAdmin); 
+
+router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createPet);
+router.put('/:id', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), updatePet);
+router.delete('/:id', auth, requireRoles(['Admin']), deletePet);
 
 module.exports = router;
