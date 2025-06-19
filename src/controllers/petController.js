@@ -1,105 +1,94 @@
 const Pet = require('../models/Pet');
 const Image = require('../models/ImagePet');
+const BaseCrudController = require('./baseCrudController');
 
-// POST /api/pets
-const createPet = async (req, res) => {
-  try {
-    const { name, price, age, weight, gender, description, status, type, breed_id, images } = req.body;
+class PetController extends BaseCrudController {
+  constructor() {
+    super(Pet, Image);
+  }
 
-    if (!name || !type) {
-      return res.status(400).json({ message: 'Missing name or type' });
+  getRequiredFields() {
+    return ['name', 'price', 'type']; 
+  }
+
+  getEntityName() {
+    return 'Pet';
+  }
+
+  getImageForeignKey() {
+    return 'pet_id';
+  }
+
+  async getAllPetsPublic(req, res) {
+    try {
+      const pets = await this.model.find()
+        .populate('breed_id', 'name description')
+        // .populate('user_id', 'username email')
+        .lean();
+
+      // Populate images
+      if (this.imageModel) {
+        for (let pet of pets) {
+          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+          pet.images = images;
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'All pets retrieved successfully',
+        data: pets
+      });
+    } catch (error) {
+      console.error('Get all pets public error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
     }
+  }
 
-    const pet = new Pet({
-      name, price, age, weight, gender, description, status, type,
-      user_id: req.user.userId,
-      breed_id
-    });
+  async getAllPetsAdmin(req, res) {
+    try {
+      const pets = await this.model.find()
+        .populate('breed_id', 'name description')
+        .populate('user_id', 'username email role')
+        .lean();
 
-    const savedPet = await pet.save();
+      if (this.imageModel) {
+        for (let pet of pets) {
+          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+          pet.images = images;
+        }
+      }
 
-    // Nếu có images truyền vào:
-    if (Array.isArray(images)) {
-      const imageDocs = images.map(img => ({
-        url: img.url,
-        is_primary: img.is_primary || false,
-        pet_id: savedPet._id
-      }));
-      await Image.insertMany(imageDocs);
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'All pets for admin retrieved successfully',
+        data: pets
+      });
+    } catch (error) {
+      console.error('Get all pets admin error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
     }
-
-    res.status(201).json({ message: 'Pet created', data: savedPet });
-
-  } catch (error) {
-    console.error('Create pet error:', error);
-    res.status(500).json({ message: 'Internal server error' });
   }
-};
+}
 
-// GET /api/pets
-const getMyPets = async (req, res) => {
-  try {
-    const pets = await Pet.find({ user_id: req.user.userId })
-      .lean();
-
-    // Gắn thêm hình ảnh từ model `Image`
-    const petIds = pets.map(p => p._id);
-    const images = await Image.find({ pet_id: { $in: petIds } });
-
-    const petsWithImages = pets.map(pet => {
-      const petImages = images.filter(img => img.pet_id.toString() === pet._id.toString());
-      return { ...pet, images: petImages };
-    });
-
-    res.status(200).json({ data: petsWithImages });
-
-  } catch (error) {
-    console.error('Fetch pets error:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// PUT /api/pets/:id
-const updatePet = async (req, res) => {
-  try {
-    const updatedPet = await Pet.findOneAndUpdate(
-      { _id: req.params.id, user_id: req.user.userId },
-      req.body,
-      { new: true }
-    );
-
-    if (!updatedPet) return res.status(404).json({ message: 'Pet not found' });
-
-    res.status(200).json({ message: 'Pet updated', data: updatedPet });
-
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// DELETE /api/pets/:id
-const deletePet = async (req, res) => {
-  try {
-    const deletedPet = await Pet.findOneAndDelete({
-      _id: req.params.id,
-      user_id: req.user.userId
-    });
-
-    if (!deletedPet) return res.status(404).json({ message: 'Pet not found' });
-
-    // Xoá luôn ảnh liên quan
-    await Image.deleteMany({ pet_id: deletedPet._id });
-
-    res.status(200).json({ message: 'Pet and images deleted' });
-
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
+const petController = new PetController();
 
 module.exports = {
-  createPet,
-  getMyPets,
-  updatePet,
-  deletePet
+  createPet: petController.create.bind(petController),
+  getAllPetsPublic: petController.getAllPetsPublic.bind(petController),
+  getAllPetsAdmin: petController.getAllPetsAdmin.bind(petController), 
+  updatePet: petController.update.bind(petController),
+  deletePet: petController.delete.bind(petController)
 };
