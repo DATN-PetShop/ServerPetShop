@@ -9,7 +9,8 @@ const categoryRoutes = require('./src/routes/categoryRoutes');
 const orderRoutes = require('./src/routes/orderRoutes');
 
 // Lộc code
-
+const breedRoutes = require('./src/routes/breedRoutes');
+app.use('/api/breeds', breedRoutes);
 
 
 
