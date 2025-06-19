@@ -5,6 +5,7 @@ const cors = require('cors');
 const userRoutes = require('./src/routes/userRoutes');
 const petRoutes = require('./src/routes/petRoutes');
 const productRoutes = require('./src/routes/productRoutes');
+const orderRoutes = require('./src/routes/orderRoutes');
 
 
 
@@ -30,7 +31,30 @@ app.use('/api/pets', petRoutes);
 
 // product
 app.use('/api/products', productRoutes);
+app.use('/api/order', orderRoutes);
 
+
+
+
+
+// Tri code
+
+
+// Thanng code
+
+
+// Duc code
+
+
+// Loc code
+
+
+
+
+
+
+
+// thuy code
 
 
 
