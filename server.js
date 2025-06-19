@@ -5,7 +5,7 @@ const cors = require('cors');
 const userRoutes = require('./src/routes/userRoutes');
 const petRoutes = require('./src/routes/petRoutes');
 const productRoutes = require('./src/routes/productRoutes');
-
+const breedRoutes = require('./src/routes/breedRoutes'); 
 
 
 const app = express();
@@ -31,7 +31,8 @@ app.use('/api/pets', petRoutes);
 // product
 app.use('/api/products', productRoutes);
 
-
+// breed
+app.use('/api/breeds', breedRoutes);
 
 
 
