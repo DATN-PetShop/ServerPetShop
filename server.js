@@ -8,32 +8,8 @@ const productRoutes = require('./src/routes/productRoutes');
 const categoryRoutes = require('./src/routes/categoryRoutes');
 const orderRoutes = require('./src/routes/orderRoutes');
 
-// Lộc code
 
-
-
-
-
-
-// Thắng code
-
-
-// Tri code
-
-
-// Đức code
-
-
-
-// Thủy code
-
-
-
-
-
-
-
-const paymentRoutes = require('./src/routes/paymentRoutes'); // Uncomment if you have payment routes
+const paymentRoutes = require('./src/routes/paymentRoutes');
 const app = express();
 
 app.use(cors());
