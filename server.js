@@ -32,7 +32,7 @@ const orderRoutes = require('./src/routes/orderRoutes');
 
 
 
-
+const notificationRoutes = require('./src/routes/notificationRoutes'); // Uncomment if you have payment routes
 const paymentRoutes = require('./src/routes/paymentRoutes'); // Uncomment if you have payment routes
 const app = express();
 
@@ -85,6 +85,7 @@ app.use('/api/order', orderRoutes);
 
 // thuy code
 app.use('/api/payment', paymentRoutes);
+app.use('/api/notification', notificationRoutes); // Uncomment if you have notification routes
 
 
 
