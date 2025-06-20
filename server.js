@@ -10,6 +10,7 @@ const orderRoutes = require('./src/routes/orderRoutes');
 const breedRoutes = require('./src/routes/breedRoutes');
 const cartRoutes = require('./src/routes/cartRoutes');
 const paymentRoutes = require('./src/routes/paymentRoutes');
+const addressRoutes = require('./src/routes/addressRoutes');
 
 const app = express();
 app.use(cors());
@@ -48,6 +49,9 @@ app.use('/api/cart', cartRoutes);
 
 // thuy code
 app.use('/api/payment', paymentRoutes);
+
+//Tri
+app.use('/api/addresses', addressRoutes);
 
 
 
