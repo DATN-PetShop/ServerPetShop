@@ -7,6 +7,10 @@ const petRoutes = require('./src/routes/petRoutes');
 const productRoutes = require('./src/routes/productRoutes');
 const categoryRoutes = require('./src/routes/categoryRoutes');
 const orderRoutes = require('./src/routes/orderRoutes');
+const breedRoutes = require('./src/routes/breedRoutes');
+const cartRoutes = require('./src/routes/cartRoutes');
+const paymentRoutes = require('./src/routes/paymentRoutes');
+
 
 // Lộc code
 
@@ -35,7 +39,6 @@ const orderRoutes = require('./src/routes/orderRoutes');
 const notificationRoutes = require('./src/routes/notificationRoutes'); // Uncomment if you have payment routes
 const paymentRoutes = require('./src/routes/paymentRoutes'); // Uncomment if you have payment routes
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
@@ -64,23 +67,10 @@ app.use('/api/order', orderRoutes);
 
 
 
+app.use('/api/breeds', breedRoutes);
 
 
-// Tri code
-
-
-// Thanng code
-
-
-// Duc code
-
-
-// Loc code
-
-
-
-
-
+app.use('/api/cart', cartRoutes); 
 
 
 // thuy code
