@@ -1,3 +1,4 @@
+// src/routes/productRoutes.js
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
@@ -8,13 +9,14 @@ const {
   updateProduct,
   deleteProduct
 } = require('../controllers/productController');
+const upload = require('../middleware/upload');
 
-// lay products
 router.get('/', getAllProducts);
 
-// them sua xoa product
-router.post('/', auth, requireRoles(['Admin']), createProduct);
-router.put('/:id', auth, requireRoles(['Admin']), updateProduct);
+router.post('/', auth, requireRoles(['Admin']), upload.array('images', 10), createProduct);
+
+router.put('/:id', auth, requireRoles(['Admin']), upload.array('images', 10), updateProduct);
+
 router.delete('/:id', auth, requireRoles(['Admin']), deleteProduct);
 
 module.exports = router;
