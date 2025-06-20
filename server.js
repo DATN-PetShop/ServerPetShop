@@ -13,6 +13,9 @@ const app = express();
 const breedRoutes = require('./src/routes/breedRoutes');
 app.use('/api/breeds', breedRoutes);
 
+const cartRoutes = require('./src/routes/cartRoutes');
+app.use('/api/cart', cartRoutes); 
+
 
 
 
