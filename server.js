@@ -37,7 +37,6 @@ const paymentRoutes = require('./src/routes/paymentRoutes');
 
 
 const notificationRoutes = require('./src/routes/notificationRoutes'); // Uncomment if you have payment routes
-const paymentRoutes = require('./src/routes/paymentRoutes'); // Uncomment if you have payment routes
 const app = express();
 app.use(cors());
 app.use(express.json());
