@@ -14,10 +14,15 @@ const {
   getFilterOptions
 } = require('../controllers/petController');
 
-
+// search
 router.get('/search', searchPets);
 router.get('/search/suggestions', searchSuggestions);
 router.get('/filter-options', getFilterOptions);
+
+//filter
+router.get('/breed/:breedId', getPetsByBreed);
+router.get('/breed/:breedId/statistics', getBreedStatistics);
+router.get('/category/:categoryId', getPetsByCategory);
 
 // Public routes
 router.get('/', getAllPetsPublic); // all role có thể xem

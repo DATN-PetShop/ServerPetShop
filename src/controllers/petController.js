@@ -333,7 +333,303 @@ class PetController extends BaseCrudController {
       });
     }
   }
+
+  async getPetsByBreed(req, res) {
+    try {
+      const { breedId } = req.params;
+      const {
+        sortBy = 'created_at',
+        sortOrder = 'desc',
+        page = 1,
+        limit = 10,
+        status = 'available',
+        minPrice,
+        maxPrice
+      } = req.query;
+
+      const breed = await mongoose.model('Breed').findById(breedId);
+      if (!breed) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Breed not found',
+          data: null
+        });
+      }
+
+      const filter = { breed_id: breedId };
+      
+      if (status) {
+        filter.status = status;
+      }
+
+      if (minPrice || maxPrice) {
+        filter.price = {};
+        if (minPrice) filter.price.$gte = Number(minPrice);
+        if (maxPrice) filter.price.$lte = Number(maxPrice);
+      }
+
+      const sort = {};
+      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+      const skip = (Number(page) - 1) * Number(limit);
+
+      const pets = await this.model.find(filter)
+        .populate('breed_id', 'name description category_id')
+        .populate({
+          path: 'breed_id',
+          populate: {
+            path: 'category_id',
+            select: 'name description'
+          }
+        })
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit))
+        .lean();
+
+      const totalCount = await this.model.countDocuments(filter);
+
+      if (this.imageModel) {
+        for (let pet of pets) {
+          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+          pet.images = images;
+        }
+      }
+
+      const totalPages = Math.ceil(totalCount / Number(limit));
+      const hasNextPage = Number(page) < totalPages;
+      const hasPrevPage = Number(page) > 1;
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: `Pets of breed "${breed.name}" retrieved successfully`,
+        data: {
+          breed: breed,
+          pets,
+          pagination: {
+            currentPage: Number(page),
+            totalPages,
+            totalCount,
+            hasNextPage,
+            hasPrevPage,
+            limit: Number(limit)
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Get pets by breed error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+
+  async getPetsByCategory(req, res) {
+    try {
+      const { categoryId } = req.params;
+      const {
+        sortBy = 'created_at',
+        sortOrder = 'desc',
+        page = 1,
+        limit = 10,
+        status = 'available',
+        breedId, 
+        minPrice,
+        maxPrice
+      } = req.query;
+
+      const category = await mongoose.model('Category').findById(categoryId);
+      if (!category) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Category not found',
+          data: null
+        });
+      }
+
+      let breedFilter = { category_id: categoryId };
+      if (breedId) {
+        breedFilter._id = breedId;
+      }
+
+      const breeds = await mongoose.model('Breed').find(breedFilter).select('_id');
+      const breedIds = breeds.map(breed => breed._id);
+
+      if (breedIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          statusCode: 200,
+          message: `No breeds found in category "${category.name}"`,
+          data: {
+            category,
+            pets: [],
+            pagination: {
+              currentPage: Number(page),
+              totalPages: 0,
+              totalCount: 0,
+              hasNextPage: false,
+              hasPrevPage: false,
+              limit: Number(limit)
+            }
+          }
+        });
+      }
+
+      const filter = { breed_id: { $in: breedIds } };
+      
+      if (status) {
+        filter.status = status;
+      }
+
+      if (minPrice || maxPrice) {
+        filter.price = {};
+        if (minPrice) filter.price.$gte = Number(minPrice);
+        if (maxPrice) filter.price.$lte = Number(maxPrice);
+      }
+
+      const sort = {};
+      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+      const skip = (Number(page) - 1) * Number(limit);
+
+      const pets = await this.model.find(filter)
+        .populate('breed_id', 'name description category_id')
+        .populate({
+          path: 'breed_id',
+          populate: {
+            path: 'category_id',
+            select: 'name description'
+          }
+        })
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit))
+        .lean();
+
+      const totalCount = await this.model.countDocuments(filter);
+
+      if (this.imageModel) {
+        for (let pet of pets) {
+          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+          pet.images = images;
+        }
+      }
+
+      const availableBreeds = await mongoose.model('Breed').find({ category_id: categoryId })
+        .select('_id name description');
+
+      const totalPages = Math.ceil(totalCount / Number(limit));
+      const hasNextPage = Number(page) < totalPages;
+      const hasPrevPage = Number(page) > 1;
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: `Pets in category "${category.name}" retrieved successfully`,
+        data: {
+          category,
+          availableBreeds,
+          pets,
+          pagination: {
+            currentPage: Number(page),
+            totalPages,
+            totalCount,
+            hasNextPage,
+            hasPrevPage,
+            limit: Number(limit)
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Get pets by category error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+
+  async getBreedStatistics(req, res) {
+    try {
+      const { breedId } = req.params;
+
+      // Validate breed exists
+      const breed = await mongoose.model('Breed').findById(breedId)
+        .populate('category_id', 'name');
+      
+      if (!breed) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Breed not found',
+          data: null
+        });
+      }
+
+      // Get statistics
+      const stats = await this.model.aggregate([
+        { $match: { breed_id: new mongoose.Types.ObjectId(breedId) } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            avgPrice: { $avg: '$price' },
+            minPrice: { $min: '$price' },
+            maxPrice: { $max: '$price' },
+            avgAge: { $avg: '$age' },
+            avgWeight: { $avg: '$weight' }
+          }
+        }
+      ]);
+
+      // Gender distribution
+      const genderStats = await this.model.aggregate([
+        { $match: { breed_id: new mongoose.Types.ObjectId(breedId) } },
+        {
+          $group: {
+            _id: '$gender',
+            count: { $sum: 1 }
+          }
+        }
+      ]);
+
+      const totalCount = await this.model.countDocuments({ breed_id: breedId });
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Breed statistics retrieved successfully',
+        data: {
+          breed,
+          totalPets: totalCount,
+          statusDistribution: stats,
+          genderDistribution: genderStats
+        }
+      });
+
+    } catch (error) {
+      console.error('Get breed statistics error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
 }
+
+
 
 const petController = new PetController();
 
@@ -346,5 +642,10 @@ module.exports = {
   // FIX
   searchPets: petController.searchPets.bind(petController),
   searchSuggestions: petController.searchSuggestions.bind(petController),
-  getFilterOptions: petController.getFilterOptions.bind(petController)
+  getFilterOptions: petController.getFilterOptions.bind(petController),
+
+  //new 
+  getPetsByBreed: petController.getPetsByBreed.bind(petController),
+  getPetsByCategory: petController.getPetsByCategory.bind(petController),
+  getBreedStatistics: petController.getBreedStatistics.bind(petController)
 };
