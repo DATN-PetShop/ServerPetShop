@@ -18,7 +18,12 @@ const {
   searchPetsByCategory,
   getTrendingCategories,
   compareCategories,
-  getCategoryInsights
+  getCategoryInsights,
+  searchPetsByBreed,
+  getSimilarBreeds,
+  getBreedPopularityRanking,
+  compareBreedPrices,
+  getBreedSearchSuggestions
 } = require('../controllers/petController');
 
 // search
@@ -36,6 +41,15 @@ router.get('/category/:categoryId/insights', getCategoryInsights);
 router.get('/breed/:breedId', getPetsByBreed);
 router.get('/breed/:breedId/statistics', getBreedStatistics);
 router.get('/category/:categoryId', getPetsByCategory);
+
+router.get('/search/breed', searchPetsByBreed);               
+router.get('/search/breed/suggestions', getBreedSearchSuggestions); 
+router.get('/breed/:breedId/similar', getSimilarBreeds);     
+router.get('/breeds/popularity', getBreedPopularityRanking); 
+router.post('/breeds/compare-prices', compareBreedPrices);  
+router.get('/search', searchPets);
+router.get('/search/suggestions', searchSuggestions);
+router.get('/filter-options', getFilterOptions);
 
 // Public routes
 router.get('/', getAllPetsPublic); // all role có thể xem

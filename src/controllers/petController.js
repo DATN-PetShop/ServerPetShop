@@ -1,7 +1,7 @@
 const Pet = require('../models/Pet');
 const Image = require('../models/ImagePet');
 const BaseCrudController = require('./baseCrudController');
-const mongoose = require('mongoose'); 
+const mongoose = require('mongoose');
 
 class PetController extends BaseCrudController {
   constructor() {
@@ -9,7 +9,7 @@ class PetController extends BaseCrudController {
   }
 
   getRequiredFields() {
-    return ['name', 'price', 'type']; 
+    return ['name', 'price', 'type'];
   }
 
   getEntityName() {
@@ -281,7 +281,7 @@ class PetController extends BaseCrudController {
       const types = await this.model.distinct('type');
       const genders = await this.model.distinct('gender');
       const statuses = await this.model.distinct('status');
-      
+
       // Lấy khoảng giá
       const priceRange = await this.model.aggregate([
         {
@@ -358,7 +358,7 @@ class PetController extends BaseCrudController {
       }
 
       const filter = { breed_id: breedId };
-      
+
       if (status) {
         filter.status = status;
       }
@@ -439,7 +439,7 @@ class PetController extends BaseCrudController {
         page = 1,
         limit = 10,
         status = 'available',
-        breedId, 
+        breedId,
         minPrice,
         maxPrice
       } = req.query;
@@ -483,7 +483,7 @@ class PetController extends BaseCrudController {
       }
 
       const filter = { breed_id: { $in: breedIds } };
-      
+
       if (status) {
         filter.status = status;
       }
@@ -565,7 +565,7 @@ class PetController extends BaseCrudController {
 
       const breed = await mongoose.model('Breed').findById(breedId)
         .populate('category_id', 'name');
-      
+
       if (!breed) {
         return res.status(404).json({
           success: false,
@@ -625,12 +625,12 @@ class PetController extends BaseCrudController {
     }
   }
 
-    async searchPetsByCategory(req, res) {
+  async searchPetsByCategory(req, res) {
     try {
       const {
-        keyword,          
-        categoryIds,     
-        breedIds,      
+        keyword,
+        categoryIds,
+        breedIds,
         minPrice,
         maxPrice,
         minAge,
@@ -639,17 +639,17 @@ class PetController extends BaseCrudController {
         maxWeight,
         gender,
         status = 'available',
-        type,             
+        type,
         sortBy = 'created_at',
         sortOrder = 'desc',
         page = 1,
         limit = 12,
-        includeStats = false  
+        includeStats = false
       } = req.query;
 
-      const categoryIdArray = categoryIds ? 
+      const categoryIdArray = categoryIds ?
         (Array.isArray(categoryIds) ? categoryIds : categoryIds.split(',')) : [];
-      const breedIdArray = breedIds ? 
+      const breedIdArray = breedIds ?
         (Array.isArray(breedIds) ? breedIds : breedIds.split(',')) : [];
 
       let breedFilter = {};
@@ -672,7 +672,7 @@ class PetController extends BaseCrudController {
         if (breedIdArray.length > 0) {
           breedFilter._id = { $in: breedIdArray.map(id => new mongoose.Types.ObjectId(id)) };
         }
-        
+
         const breeds = await mongoose.model('Breed').find(breedFilter).select('_id');
         validBreedIds = breeds.map(breed => breed._id);
 
@@ -759,8 +759,8 @@ class PetController extends BaseCrudController {
 
       if (this.imageModel) {
         for (let pet of pets) {
-          const images = await this.imageModel.find({ 
-            [this.getImageForeignKey()]: pet._id 
+          const images = await this.imageModel.find({
+            [this.getImageForeignKey()]: pet._id
           }).lean();
           pet.images = images;
         }
@@ -906,10 +906,10 @@ class PetController extends BaseCrudController {
 
   async getTrendingCategories(req, res) {
     try {
-      const { 
+      const {
         days = 30,           // Tính trend trong X ngày qua
         limit = 5,           // Top X categories
-        includeStats = true  
+        includeStats = true
       } = req.query;
 
       const daysAgo = new Date();
@@ -1066,8 +1066,8 @@ class PetController extends BaseCrudController {
         }
 
         // Get breeds in this category
-        const breeds = await mongoose.model('Breed').find({ 
-          category_id: categoryId 
+        const breeds = await mongoose.model('Breed').find({
+          category_id: categoryId
         }).select('_id name');
 
         const breedIds = breeds.map(breed => breed._id);
@@ -1170,7 +1170,6 @@ class PetController extends BaseCrudController {
     try {
       const { categoryId } = req.params;
 
-      // Validate category
       const category = await mongoose.model('Category').findById(categoryId);
       if (!category) {
         return res.status(404).json({
@@ -1181,14 +1180,12 @@ class PetController extends BaseCrudController {
         });
       }
 
-      // Get all breeds in category
-      const breeds = await mongoose.model('Breed').find({ 
-        category_id: categoryId 
+      const breeds = await mongoose.model('Breed').find({
+        category_id: categoryId
       }).select('_id name description');
 
       const breedIds = breeds.map(breed => breed._id);
 
-      // 1. Popular breeds trong category
       const popularBreeds = await this.model.aggregate([
         { $match: { breed_id: { $in: breedIds } } },
         {
@@ -1223,7 +1220,6 @@ class PetController extends BaseCrudController {
         }
       ]);
 
-      // 2. Price trends
       const priceAnalysis = await this.model.aggregate([
         { $match: { breed_id: { $in: breedIds } } },
         {
@@ -1237,10 +1233,9 @@ class PetController extends BaseCrudController {
           }
         },
         { $sort: { '_id.year': 1, '_id.month': 1 } },
-        { $limit: 12 } // Last 12 months
+        { $limit: 12 }
       ]);
 
-      // 3. Age và weight distribution
       const physicalStats = await this.model.aggregate([
         { $match: { breed_id: { $in: breedIds } } },
         {
@@ -1258,10 +1253,8 @@ class PetController extends BaseCrudController {
         }
       ]);
 
-      // 4. Recommendations
       const recommendations = [];
 
-      // Recommend based on popularity
       if (popularBreeds.length > 0) {
         const topBreed = popularBreeds[0];
         recommendations.push({
@@ -1272,7 +1265,6 @@ class PetController extends BaseCrudController {
         });
       }
 
-      // Recommend based on price
       const affordableBreeds = popularBreeds.filter(breed => breed.avgPrice < 3000000);
       if (affordableBreeds.length > 0) {
         recommendations.push({
@@ -1283,7 +1275,6 @@ class PetController extends BaseCrudController {
         });
       }
 
-      // Recommend available pets
       const availableBreeds = popularBreeds.filter(breed => breed.availablePets > 0);
       if (availableBreeds.length > 0) {
         recommendations.push({
@@ -1321,6 +1312,748 @@ class PetController extends BaseCrudController {
       });
     }
   }
+
+  async searchPetsByBreed(req, res) {
+    try {
+      const {
+        keyword,           // Tìm kiếm tên breed
+        breedIds,         // Có thể search nhiều breeds cùng lúc
+        categoryId,       // Filter breeds trong category cụ thể
+        minPrice,
+        maxPrice,
+        minAge,
+        maxAge,
+        minWeight,
+        maxWeight,
+        gender,
+        status = 'available',
+        type,
+        color,
+        vaccinated,
+        sortBy = 'created_at',
+        sortOrder = 'desc',
+        page = 1,
+        limit = 12,
+        includeBreedInfo = true,
+        groupByBreed = false
+      } = req.query;
+
+      const breedIdArray = breedIds ?
+        (Array.isArray(breedIds) ? breedIds : breedIds.split(',')) : [];
+
+      let breedFilter = {};
+      let petFilter = {};
+
+      if (keyword) {
+        breedFilter.$or = [
+          { name: { $regex: keyword, $options: 'i' } },
+          { description: { $regex: keyword, $options: 'i' } }
+        ];
+      }
+
+      if (categoryId) {
+        breedFilter.category_id = new mongoose.Types.ObjectId(categoryId);
+      }
+
+      if (breedIdArray.length > 0) {
+        breedFilter._id = { $in: breedIdArray.map(id => new mongoose.Types.ObjectId(id)) };
+      }
+
+      let validBreeds = [];
+      if (Object.keys(breedFilter).length > 0 || breedIdArray.length > 0) {
+        validBreeds = await mongoose.model('Breed').find(breedFilter)
+          .populate('category_id', 'name description')
+          .lean();
+
+        if (validBreeds.length === 0) {
+          return res.status(200).json({
+            success: true,
+            statusCode: 200,
+            message: 'No breeds found matching the criteria',
+            data: {
+              pets: [],
+              breeds: [],
+              pagination: {
+                currentPage: Number(page),
+                totalPages: 0,
+                totalCount: 0,
+                hasNextPage: false,
+                hasPrevPage: false,
+                limit: Number(limit)
+              }
+            }
+          });
+        }
+
+        const validBreedIds = validBreeds.map(breed => breed._id);
+        petFilter.breed_id = { $in: validBreedIds };
+      }
+
+      if (type) {
+        petFilter.type = { $regex: type, $options: 'i' };
+      }
+
+      if (gender) {
+        petFilter.gender = gender;
+      }
+
+      if (status) {
+        petFilter.status = status;
+      }
+
+      if (color) {
+        petFilter.color = { $regex: color, $options: 'i' };
+      }
+
+      if (vaccinated !== undefined) {
+        petFilter.vaccinated = vaccinated === 'true';
+      }
+
+      if (minPrice || maxPrice) {
+        petFilter.price = {};
+        if (minPrice) petFilter.price.$gte = Number(minPrice);
+        if (maxPrice) petFilter.price.$lte = Number(maxPrice);
+      }
+
+      if (minAge || maxAge) {
+        petFilter.age = {};
+        if (minAge) petFilter.age.$gte = Number(minAge);
+        if (maxAge) petFilter.age.$lte = Number(maxAge);
+      }
+
+      if (minWeight || maxWeight) {
+        petFilter.weight = {};
+        if (minWeight) petFilter.weight.$gte = Number(minWeight);
+        if (maxWeight) petFilter.weight.$lte = Number(maxWeight);
+      }
+
+      if (groupByBreed === 'true') {
+        return await this.getGroupedBreedResults(req, res, petFilter, validBreeds);
+      }
+
+      const sort = {};
+      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+      const skip = (Number(page) - 1) * Number(limit);
+
+      const pets = await this.model.find(petFilter)
+        .populate({
+          path: 'breed_id',
+          select: 'name description category_id',
+          populate: {
+            path: 'category_id',
+            select: 'name description'
+          }
+        })
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit))
+        .lean();
+
+      const totalCount = await this.model.countDocuments(petFilter);
+
+      if (this.imageModel) {
+        for (let pet of pets) {
+          const images = await this.imageModel.find({
+            [this.getImageForeignKey()]: pet._id
+          }).lean();
+          pet.images = images;
+        }
+      }
+
+      const totalPages = Math.ceil(totalCount / Number(limit));
+      const hasNextPage = Number(page) < totalPages;
+      const hasPrevPage = Number(page) > 1;
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Breed search completed successfully',
+        data: {
+          pets,
+          breeds: includeBreedInfo === 'true' ? validBreeds : undefined,
+          pagination: {
+            currentPage: Number(page),
+            totalPages,
+            totalCount,
+            hasNextPage,
+            hasPrevPage,
+            limit: Number(limit)
+          },
+          filters: {
+            keyword,
+            breedIds: breedIdArray,
+            categoryId,
+            priceRange: { min: minPrice, max: maxPrice },
+            ageRange: { min: minAge, max: maxAge },
+            weightRange: { min: minWeight, max: maxWeight },
+            gender,
+            status,
+            type,
+            color,
+            vaccinated
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Breed search error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+
+  async getGroupedBreedResults(req, res, petFilter, validBreeds) {
+    const { page = 1, limit = 5 } = req.query;
+    const groupedResults = [];
+
+    for (let breed of validBreeds) {
+      const breedPetFilter = {
+        ...petFilter,
+        breed_id: breed._id
+      };
+
+      const pets = await this.model.find(breedPetFilter)
+        .sort({ created_at: -1 })
+        .limit(6)
+        .lean();
+
+      const totalPetsInBreed = await this.model.countDocuments(breedPetFilter);
+
+      if (this.imageModel) {
+        for (let pet of pets) {
+          const images = await this.imageModel.find({
+            [this.getImageForeignKey()]: pet._id
+          }).lean();
+          pet.images = images;
+        }
+      }
+
+      groupedResults.push({
+        breed: breed,
+        pets: pets,
+        totalPets: totalPetsInBreed,
+        hasMore: totalPetsInBreed > 6
+      });
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const paginatedResults = groupedResults.slice(skip, skip + Number(limit));
+
+    const totalBreeds = groupedResults.length;
+    const totalPages = Math.ceil(totalBreeds / Number(limit));
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Grouped breed search completed successfully',
+      data: {
+        groupedResults: paginatedResults,
+        pagination: {
+          currentPage: Number(page),
+          totalPages,
+          totalBreeds,
+          hasNextPage: Number(page) < totalPages,
+          hasPrevPage: Number(page) > 1,
+          limit: Number(limit)
+        }
+      }
+    });
+  }
+
+  async getSimilarBreeds(req, res) {
+    try {
+      const { breedId } = req.params;
+      const { limit = 5, includePets = false } = req.query;
+
+      const targetBreed = await mongoose.model('Breed').findById(breedId)
+        .populate('category_id', 'name')
+        .lean();
+
+      if (!targetBreed) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Breed not found',
+          data: null
+        });
+      }
+
+      const similarBreeds = await mongoose.model('Breed').find({
+        category_id: targetBreed.category_id._id,
+        _id: { $ne: breedId }
+      })
+        .populate('category_id', 'name description')
+        .limit(Number(limit))
+        .lean();
+
+      const enrichedBreeds = [];
+
+      for (let breed of similarBreeds) {
+        const petCount = await this.model.countDocuments({
+          breed_id: breed._id,
+          status: 'available'
+        });
+
+        const breedData = {
+          ...breed,
+          availablePets: petCount
+        };
+
+        if (includePets === 'true') {
+          const samplePets = await this.model.find({
+            breed_id: breed._id,
+            status: 'available'
+          })
+            .limit(3)
+            .select('name price images')
+            .lean();
+
+          if (this.imageModel) {
+            for (let pet of samplePets) {
+              const images = await this.imageModel.find({
+                [this.getImageForeignKey()]: pet._id
+              }).lean();
+              pet.images = images;
+            }
+          }
+
+          breedData.samplePets = samplePets;
+        }
+
+        enrichedBreeds.push(breedData);
+      }
+
+      enrichedBreeds.sort((a, b) => b.availablePets - a.availablePets);
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Similar breeds retrieved successfully',
+        data: {
+          targetBreed,
+          similarBreeds: enrichedBreeds,
+          category: targetBreed.category_id
+        }
+      });
+
+    } catch (error) {
+      console.error('Get similar breeds error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+
+  async getBreedPopularityRanking(req, res) {
+    try {
+      const {
+        categoryId,       // Filter by category
+        timeframe = 30,   // Days to consider for popularity
+        limit = 10,
+        includeStats = true
+      } = req.query;
+
+      let matchFilter = {};
+
+      if (timeframe > 0) {
+        const daysAgo = new Date();
+        daysAgo.setDate(daysAgo.getDate() - Number(timeframe));
+        matchFilter.created_at = { $gte: daysAgo };
+      }
+
+      let breedFilter = {};
+      if (categoryId) {
+        breedFilter.category_id = new mongoose.Types.ObjectId(categoryId);
+      }
+
+      const popularityPipeline = [
+        { $match: matchFilter },
+        {
+          $group: {
+            _id: '$breed_id',
+            petCount: { $sum: 1 },
+            avgPrice: { $avg: '$price' },
+            minPrice: { $min: '$price' },
+            maxPrice: { $max: '$price' },
+            availableCount: {
+              $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
+            },
+            soldCount: {
+              $sum: { $cond: [{ $eq: ['$status', 'sold'] }, 1, 0] }
+            }
+          }
+        },
+        {
+          $lookup: {
+            from: 'breeds',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'breed'
+          }
+        },
+        { $unwind: '$breed' }
+      ];
+
+      if (categoryId) {
+        popularityPipeline.push({
+          $match: { 'breed.category_id': new mongoose.Types.ObjectId(categoryId) }
+        });
+      }
+
+      popularityPipeline.push(
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'breed.category_id',
+            foreignField: '_id',
+            as: 'category'
+          }
+        },
+        { $unwind: '$category' },
+        {
+          $addFields: {
+            popularityScore: {
+              $add: [
+                { $multiply: ['$petCount', 0.4] },      // 40% weight for total pets
+                { $multiply: ['$soldCount', 0.4] },     // 40% weight for sold pets
+                { $multiply: ['$availableCount', 0.2] } // 20% weight for available pets
+              ]
+            }
+          }
+        },
+        { $sort: { popularityScore: -1 } },
+        { $limit: Number(limit) },
+        {
+          $project: {
+            breed: '$breed',
+            category: '$category',
+            statistics: {
+              totalPets: '$petCount',
+              availablePets: '$availableCount',
+              soldPets: '$soldCount',
+              avgPrice: '$avgPrice',
+              minPrice: '$minPrice',
+              maxPrice: '$maxPrice',
+              popularityScore: '$popularityScore'
+            }
+          }
+        }
+      );
+
+      const popularBreeds = await this.model.aggregate(popularityPipeline);
+
+      popularBreeds.forEach((item, index) => {
+        item.rank = index + 1;
+      });
+
+      let additionalStats = {};
+      if (includeStats === 'true') {
+        const overallStats = await this.model.aggregate([
+          { $match: matchFilter },
+          {
+            $group: {
+              _id: null,
+              totalPets: { $sum: 1 },
+              totalBreeds: { $addToSet: '$breed_id' },
+              avgPrice: { $avg: '$price' }
+            }
+          },
+          {
+            $addFields: {
+              uniqueBreeds: { $size: '$totalBreeds' }
+            }
+          }
+        ]);
+
+        additionalStats = overallStats[0] || {};
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: `Top ${limit} popular breeds in last ${timeframe} days`,
+        data: {
+          rankings: popularBreeds,
+          timeframe: {
+            days: Number(timeframe),
+            from: timeframe > 0 ? new Date(Date.now() - timeframe * 24 * 60 * 60 * 1000) : null,
+            to: new Date()
+          },
+          statistics: additionalStats
+        }
+      });
+
+    } catch (error) {
+      console.error('Get breed popularity ranking error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+
+  async compareBreedPrices(req, res) {
+    try {
+      const { breedIds } = req.body;
+
+      if (!breedIds || !Array.isArray(breedIds) || breedIds.length < 2) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'Please provide at least 2 breed IDs to compare',
+          data: null
+        });
+      }
+
+      if (breedIds.length > 6) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'Maximum 6 breeds can be compared at once',
+          data: null
+        });
+      }
+
+      const comparison = [];
+
+      for (let breedId of breedIds) {
+        const breed = await mongoose.model('Breed').findById(breedId)
+          .populate('category_id', 'name')
+          .lean();
+
+        if (!breed) {
+          return res.status(404).json({
+            success: false,
+            statusCode: 404,
+            message: `Breed with ID ${breedId} not found`,
+            data: null
+          });
+        }
+
+        const priceStats = await this.model.aggregate([
+          { $match: { breed_id: new mongoose.Types.ObjectId(breedId) } },
+          {
+            $group: {
+              _id: null,
+              totalPets: { $sum: 1 },
+              avgPrice: { $avg: '$price' },
+              minPrice: { $min: '$price' },
+              maxPrice: { $max: '$price' },
+              medianPrice: { $push: '$price' },
+              availableCount: {
+                $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
+              }
+            }
+          }
+        ]);
+
+        const prices = priceStats[0]?.medianPrice || [];
+        prices.sort((a, b) => a - b);
+        const median = prices.length > 0 ?
+          (prices.length % 2 === 0 ?
+            (prices[Math.floor(prices.length / 2) - 1] + prices[Math.floor(prices.length / 2)]) / 2 :
+            prices[Math.floor(prices.length / 2)]) : 0;
+
+        const priceDistribution = await this.model.aggregate([
+          { $match: { breed_id: new mongoose.Types.ObjectId(breedId) } },
+          {
+            $bucket: {
+              groupBy: '$price',
+              boundaries: [0, 1000000, 2000000, 3000000, 5000000, 10000000, Infinity],
+              default: 'Other',
+              output: {
+                count: { $sum: 1 },
+                percentage: { $sum: 1 }
+              }
+            }
+          }
+        ]);
+
+        const totalForDistribution = priceStats[0]?.totalPets || 1;
+        priceDistribution.forEach(bucket => {
+          bucket.percentage = ((bucket.count / totalForDistribution) * 100).toFixed(1);
+        });
+
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+        const priceTrends = await this.model.aggregate([
+          {
+            $match: {
+              breed_id: new mongoose.Types.ObjectId(breedId),
+              created_at: { $gte: sixMonthsAgo }
+            }
+          },
+          {
+            $group: {
+              _id: {
+                year: { $year: '$created_at' },
+                month: { $month: '$created_at' }
+              },
+              avgPrice: { $avg: '$price' },
+              count: { $sum: 1 }
+            }
+          },
+          { $sort: { '_id.year': 1, '_id.month': 1 } }
+        ]);
+
+        comparison.push({
+          breed: breed,
+          priceAnalysis: {
+            overview: {
+              totalPets: priceStats[0]?.totalPets || 0,
+              availablePets: priceStats[0]?.availableCount || 0,
+              avgPrice: priceStats[0]?.avgPrice || 0,
+              minPrice: priceStats[0]?.minPrice || 0,
+              maxPrice: priceStats[0]?.maxPrice || 0,
+              medianPrice: median
+            },
+            distribution: priceDistribution,
+            trends: priceTrends
+          }
+        });
+      }
+
+      const sortedByAvgPrice = [...comparison].sort((a, b) =>
+        a.priceAnalysis.overview.avgPrice - b.priceAnalysis.overview.avgPrice
+      );
+
+      const insights = {
+        bestValue: sortedByAvgPrice[0],
+        mostExpensive: sortedByAvgPrice[sortedByAvgPrice.length - 1],
+        priceRange: {
+          lowest: Math.min(...comparison.map(c => c.priceAnalysis.overview.minPrice)),
+          highest: Math.max(...comparison.map(c => c.priceAnalysis.overview.maxPrice))
+        }
+      };
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Breed price comparison completed successfully',
+        data: {
+          comparison,
+          insights,
+          comparedAt: new Date()
+        }
+      });
+
+    } catch (error) {
+      console.error('Compare breed prices error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+
+  async getBreedSearchSuggestions(req, res) {
+    try {
+      const { keyword, categoryId, limit = 10 } = req.query;
+
+      if (!keyword || keyword.length < 2) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'Keyword must be at least 2 characters',
+          data: null
+        });
+      }
+
+      let breedFilter = {
+        $or: [
+          { name: { $regex: keyword, $options: 'i' } },
+          { description: { $regex: keyword, $options: 'i' } }
+        ]
+      };
+
+      if (categoryId) {
+        breedFilter.category_id = new mongoose.Types.ObjectId(categoryId);
+      }
+
+      const suggestions = await mongoose.model('Breed').aggregate([
+        { $match: breedFilter },
+        {
+          $lookup: {
+            from: 'pets',
+            localField: '_id',
+            foreignField: 'breed_id',
+            as: 'pets'
+          }
+        },
+        {
+          $lookup: {
+            from: 'categories',
+            localField: 'category_id',
+            foreignField: '_id',
+            as: 'category'
+          }
+        },
+        { $unwind: '$category' },
+        {
+          $addFields: {
+            totalPets: { $size: '$pets' },
+            availablePets: {
+              $size: {
+                $filter: {
+                  input: '$pets',
+                  cond: { $eq: ['$$this.status', 'available'] }
+                }
+              }
+            }
+          }
+        },
+        {
+          $project: {
+            name: 1,
+            description: 1,
+            category: { name: 1, _id: 1 },
+            totalPets: 1,
+            availablePets: 1
+          }
+        },
+        { $sort: { totalPets: -1, name: 1 } },
+        { $limit: Number(limit) }
+      ]);
+
+      const petNameSuggestions = await this.model.distinct('name', {
+        name: { $regex: keyword, $options: 'i' }
+      });
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Breed search suggestions retrieved successfully',
+        data: {
+          breeds: suggestions,
+          petNames: petNameSuggestions.slice(0, 5),
+          keyword,
+          totalSuggestions: suggestions.length + Math.min(petNameSuggestions.length, 5)
+        }
+      });
+
+    } catch (error) {
+      console.error('Get breed search suggestions error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
 }
 
 
@@ -1330,7 +2063,7 @@ const petController = new PetController();
 module.exports = {
   createPet: petController.create.bind(petController),
   getAllPetsPublic: petController.getAllPetsPublic.bind(petController),
-  getAllPetsAdmin: petController.getAllPetsAdmin.bind(petController), 
+  getAllPetsAdmin: petController.getAllPetsAdmin.bind(petController),
   updatePet: petController.update.bind(petController),
   deletePet: petController.delete.bind(petController),
   // FIX
@@ -1347,5 +2080,13 @@ module.exports = {
   searchPetsByCategory: petController.searchPetsByCategory.bind(petController),
   getTrendingCategories: petController.getTrendingCategories.bind(petController),
   compareCategories: petController.compareCategories.bind(petController),
-  getCategoryInsights: petController.getCategoryInsights.bind(petController)
+  getCategoryInsights: petController.getCategoryInsights.bind(petController),
+
+  //
+
+  searchPetsByBreed: petController.searchPetsByBreed.bind(petController),
+  getSimilarBreeds: petController.getSimilarBreeds.bind(petController),
+  getBreedPopularityRanking: petController.getBreedPopularityRanking.bind(petController),
+  compareBreedPrices: petController.compareBreedPrices.bind(petController),
+  getBreedSearchSuggestions: petController.getBreedSearchSuggestions.bind(petController)
 };
