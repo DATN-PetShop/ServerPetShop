@@ -1,6 +1,7 @@
 const Pet = require('../models/Pet');
 const Image = require('../models/ImagePet');
 const BaseCrudController = require('./baseCrudController');
+const mongoose = require('mongoose'); 
 
 class PetController extends BaseCrudController {
   constructor() {
@@ -342,7 +343,7 @@ module.exports = {
   getAllPetsAdmin: petController.getAllPetsAdmin.bind(petController), 
   updatePet: petController.update.bind(petController),
   deletePet: petController.delete.bind(petController),
-  // tìm kiếm
+  // FIX
   searchPets: petController.searchPets.bind(petController),
   searchSuggestions: petController.searchSuggestions.bind(petController),
   getFilterOptions: petController.getFilterOptions.bind(petController)

@@ -8,26 +8,26 @@ const {
   getAllPetsPublic,
   getAllPetsAdmin,
   updatePet,
-  deletePet
+  deletePet,
+  searchPets,
+  searchSuggestions,
+  getFilterOptions
 } = require('../controllers/petController');
 
+
+router.get('/search', searchPets);
+router.get('/search/suggestions', searchSuggestions);
+router.get('/filter-options', getFilterOptions);
+
+// Public routes
 router.get('/', getAllPetsPublic); // all role có thể xem
 
-// xem alll thong tin 
+// Admin routes
 router.get('/admin', auth, requireRoles(['Admin']), getAllPetsAdmin); 
 
+// CRUD routes (Admin/Staff only)
 router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createPet);
 router.put('/:id', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), updatePet);
 router.delete('/:id', auth, requireRoles(['Admin']), deletePet);
-
-
-// tim kiếm thú 
-// router.get('/search', searchPets);
-
-// // Lấy gợi ý tìm kiếm (public)
-// router.get('/search/suggestions', searchSuggestions);
-
-// // Lấy các options cho filter (public)
-// router.get('/filter-options', getFilterOptions);
 
 module.exports = router;
