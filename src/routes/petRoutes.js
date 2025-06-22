@@ -11,13 +11,26 @@ const {
   deletePet,
   searchPets,
   searchSuggestions,
-  getFilterOptions
+  getFilterOptions,
+  getPetsByBreed,
+  getPetsByCategory,
+  getBreedStatistics,
+  searchPetsByCategory,
+  getTrendingCategories,
+  compareCategories,
+  getCategoryInsights
 } = require('../controllers/petController');
 
 // search
 router.get('/search', searchPets);
 router.get('/search/suggestions', searchSuggestions);
 router.get('/filter-options', getFilterOptions);
+
+//search by category
+router.get('/search/category', searchPetsByCategory);      
+router.get('/trending/categories', getTrendingCategories);     
+router.post('/categories/compare', compareCategories);       
+router.get('/category/:categoryId/insights', getCategoryInsights); 
 
 //filter
 router.get('/breed/:breedId', getPetsByBreed);
