@@ -10,10 +10,10 @@ const {
   deleteAddress
 } = require('../controllers/addressController');
 
-router.get('/', auth, getAllAddresses); // Chỉ người dùng đã đăng nhập mới xem được
-router.get('/:id', auth, getAddressById); // Xem chi tiết một bản ghi
-router.post('/', auth, requireRoles(['Admin', 'User']), createAddress);
-router.put('/:id', auth, requireRoles(['Admin', 'User']), updateAddress);
-router.delete('/:id', auth, requireRoles(['Admin','User']), deleteAddress);
+router.get('/', auth, getAllAddresses); 
+router.get('/:id', auth, getAddressById); 
+router.post('/', auth,  createAddress);
+router.put('/:id', auth, updateAddress);
+router.delete('/:id', auth, deleteAddress);
 
 module.exports = router;
