@@ -1,59 +1,129 @@
+const mongoose = require('mongoose');
 const Address = require('../models/Address');
-const BaseCrudController = require('./baseCrudController');
 
-class AddressController extends BaseCrudController {
-  constructor() {
-    super(Address);
-  }
-
-  getRequiredFields() {
-    return ['street', 'city', 'state', 'postal_code', 'country', 'user_id'];
-  }
-
-  getEntityName() {
-    return 'Address';
-  }
-
-  // Lấy chi tiết một bản ghi
-  async getById(req, res) {
+class AddressController {
+  async addAddress(req, res) {
     try {
-      const address = await this.model.findOne({ _id: req.params.id })
-        .populate('user_id', 'username email')
-        .lean();
+      const user_id = req.user.userId;
+      const { street, city, state, postal_code, country, is_default } = req.body;
 
-      if (!address) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Address not found',
-          data: null
-        });
+      if (!street || !city || !state || !postal_code || !country) {
+        return res.status(400).json({ success: false, message: 'Thiếu thông tin bắt buộc' });
       }
 
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Address retrieved successfully',
-        data: address
+      if (is_default) {
+        await Address.updateMany({ user_id }, { is_default: false });
+      }
+
+      const address = new Address({
+        user_id,
+        street,
+        city,
+        state,
+        postal_code,
+        country,
+        is_default: is_default || false
       });
+
+      const saved = await address.save();
+      res.status(201).json({ success: true, message: 'Thêm địa chỉ thành công', data: saved });
     } catch (error) {
-      console.error('Get address by ID error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
+      res.status(500).json({ success: false, message: 'Lỗi server', error });
+    }
+  }
+
+  async getAddresses(req, res) {
+    try {
+      const user_id = req.user.userId;
+      const addresses = await Address.find({ user_id }).sort({ createdAt: -1 });
+      res.status(200).json({ success: true, message: 'Lấy danh sách địa chỉ thành công', data: addresses });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Lỗi server', error });
+    }
+  }
+
+  async getAddressById(req, res) {
+    try {
+      const user_id = req.user.userId;
+      const { id } = req.params;
+
+      const address = await Address.findOne({
+  _id: new mongoose.Types.ObjectId(id),
+  user_id: new mongoose.Types.ObjectId(user_id)
+});
+
+      if (!address) return res.status(404).json({ success: false, message: 'Không tìm thấy địa chỉ' });
+
+      res.status(200).json({ success: true, message: 'Lấy địa chỉ thành công', data: address });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Lỗi server', error });
+    }
+  }
+
+  async updateAddress(req, res) {
+    try {
+      const user_id = req.user.userId;
+      const { id } = req.params;
+      const updateData = req.body;
+
+      if (updateData.is_default) {
+        await Address.updateMany({ user_id }, { is_default: false });
+      }
+
+      const updated = await Address.findOneAndUpdate(
+        { _id: id, user_id },
+        updateData,
+        { new: true }
+      );
+
+      if (!updated) return res.status(404).json({ success: false, message: 'Không tìm thấy địa chỉ' });
+      res.status(200).json({ success: true, message: 'Cập nhật địa chỉ thành công', data: updated });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Lỗi server', error });
+    }
+  }
+
+  async deleteAddress(req, res) {
+    try {
+      const user_id = req.user.userId;
+      const { id } = req.params;
+      const deleted = await Address.findOneAndDelete({ _id: id, user_id });
+
+      if (!deleted) return res.status(404).json({ success: false, message: 'Không tìm thấy địa chỉ' });
+      res.status(200).json({ success: true, message: 'Xoá địa chỉ thành công' });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Lỗi server', error });
+    }
+  }
+
+  async clearAddresses(req, res) {
+    try {
+      const user_id = req.user.userId;
+      const result = await Address.deleteMany({ user_id });
+      res.status(200).json({ success: true, message: `Đã xoá ${result.deletedCount} địa chỉ`, data: result });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Lỗi server', error });
+    }
+  }
+
+  async getAddressCount(req, res) {
+    try {
+      const user_id = req.user.userId;
+      const count = await Address.countDocuments({ user_id });
+      res.status(200).json({ success: true, message: 'Tổng địa chỉ', data: { count } });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Lỗi server', error });
     }
   }
 }
 
-const addressController = new AddressController();
-
+const controller = new AddressController();
 module.exports = {
-  createAddress: addressController.create.bind(addressController),
-  getAllAddresses: addressController.getAll.bind(addressController),
-  getAddressById: addressController.getById.bind(addressController),
-  updateAddress: addressController.update.bind(addressController),
-  deleteAddress: addressController.delete.bind(addressController)
+  addAddress: controller.addAddress.bind(controller),
+  getAddresses: controller.getAddresses.bind(controller),
+  getAddressById: controller.getAddressById.bind(controller),
+  updateAddress: controller.updateAddress.bind(controller),
+  deleteAddress: controller.deleteAddress.bind(controller),
+  clearAddresses: controller.clearAddresses.bind(controller),
+  getAddressCount: controller.getAddressCount.bind(controller)
 };

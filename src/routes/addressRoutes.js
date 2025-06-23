@@ -1,19 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
-const requireRoles = require('../middleware/requireRole');
 const {
-  createAddress,
-  getAllAddresses,
+  addAddress,
+  getAddresses,
   getAddressById,
   updateAddress,
-  deleteAddress
+  deleteAddress,
+  clearAddresses,
+  getAddressCount
 } = require('../controllers/addressController');
 
-router.get('/', auth, getAllAddresses); 
-router.get('/:id', auth, getAddressById); 
-router.post('/', auth,  createAddress);
+router.post('/', auth, addAddress);
+router.get('/', auth, getAddresses);
+router.get('/count/total', auth, getAddressCount);
+router.get('/:id', auth, getAddressById);
 router.put('/:id', auth, updateAddress);
 router.delete('/:id', auth, deleteAddress);
+router.delete('/', auth, clearAddresses);
 
 module.exports = router;
