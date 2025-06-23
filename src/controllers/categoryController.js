@@ -1,9 +1,10 @@
 const Category = require('../models/Category');
+const CategoryImage = require('../models/CategoryImage');
 const BaseCrudController = require('./baseCrudController');
 
 class CategoryController extends BaseCrudController {
   constructor() {
-    super(Category); // Category không có image model
+    super(Category, CategoryImage); 
   }
 
   getRequiredFields() {
@@ -14,10 +15,22 @@ class CategoryController extends BaseCrudController {
     return 'Category';
   }
 
-  // Override getAll để không filter theo user_id (categories là public)
+  getImageForeignKey() {
+    return 'category_id';
+  }
+
   async getAll(req, res) {
     try {
       const categories = await this.model.find().lean();
+      
+      if (this.imageModel) {
+        for (let category of categories) {
+          const images = await this.imageModel.find({ 
+            [this.getImageForeignKey()]: category._id 
+          }).lean();
+          category.images = images;
+        }
+      }
 
       res.status(200).json({
         success: true,
@@ -36,11 +49,10 @@ class CategoryController extends BaseCrudController {
     }
   }
 
-  // Override create để không thêm user_id
   async create(req, res) {
     try {
       const requiredFields = this.getRequiredFields();
-      const data = { ...req.body }; // Không thêm user_id
+      const data = { ...req.body }; 
 
       for (const field of requiredFields) {
         if (!data[field]) {
@@ -55,6 +67,21 @@ class CategoryController extends BaseCrudController {
 
       const entity = new this.model(data);
       const savedEntity = await entity.save();
+
+      if (this.imageModel && req.files && req.files.length > 0) {
+        const imageDocs = req.files.map((file, index) => ({
+          url: file.path, 
+          is_primary: index === 0, 
+          [this.getImageForeignKey()]: savedEntity._id
+        }));
+        
+        await this.imageModel.insertMany(imageDocs);
+        
+        const images = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: savedEntity._id 
+        }).lean();
+        savedEntity.images = images;
+      }
 
       res.status(201).json({
         success: true,
@@ -77,12 +104,12 @@ class CategoryController extends BaseCrudController {
         success: false,
         statusCode: 500,
         message: 'Internal server error',
-        data: null
+        data: null,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
-  // Override update để không filter theo user_id
   async update(req, res) {
     try {
       const updated = await this.model.findOneAndUpdate(
@@ -98,6 +125,46 @@ class CategoryController extends BaseCrudController {
           message: `${this.getEntityName()} not found`,
           data: null
         });
+      }
+
+      if (this.imageModel && req.files && req.files.length > 0) {
+        const oldImages = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: updated._id 
+        });
+        
+        if (oldImages.length > 0) {
+          const { cloudinary } = require('../config/cloudinaryConfig');
+          const deletePromises = oldImages.map(async (img) => {
+            try {
+              const publicId = this.extractPublicIdFromUrl(img.url);
+              if (publicId) {
+                await cloudinary.uploader.destroy(publicId);
+              }
+            } catch (error) {
+              console.error('Error deleting image from Cloudinary:', error);
+            }
+          });
+          await Promise.allSettled(deletePromises);
+        }
+
+        await this.imageModel.deleteMany({ 
+          [this.getImageForeignKey()]: updated._id 
+        });
+
+        const imageDocs = req.files.map((file, index) => ({
+          url: file.path, 
+          is_primary: index === 0, 
+          [this.getImageForeignKey()]: updated._id
+        }));
+        
+        await this.imageModel.insertMany(imageDocs);
+      }
+
+      if (this.imageModel) {
+        const images = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: updated._id 
+        }).lean();
+        updated.images = images;
       }
 
       res.status(200).json({
@@ -130,6 +197,31 @@ class CategoryController extends BaseCrudController {
         });
       }
 
+      if (this.imageModel) {
+        const imagesToDelete = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: deleted._id 
+        });
+        
+        if (imagesToDelete.length > 0) {
+          const { cloudinary } = require('../config/cloudinaryConfig');
+          const deletePromises = imagesToDelete.map(async (img) => {
+            try {
+              const publicId = this.extractPublicIdFromUrl(img.url);
+              if (publicId) {
+                await cloudinary.uploader.destroy(publicId);
+              }
+            } catch (error) {
+              console.error('Error deleting image from Cloudinary:', error);
+            }
+          });
+          await Promise.allSettled(deletePromises);
+        }
+
+        await this.imageModel.deleteMany({ 
+          [this.getImageForeignKey()]: deleted._id 
+        });
+      }
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -146,6 +238,43 @@ class CategoryController extends BaseCrudController {
       });
     }
   }
+
+  async getById(req, res) {
+    try {
+      const category = await this.model.findById(req.params.id).lean();
+
+      if (!category) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Category not found',
+          data: null
+        });
+      }
+
+      if (this.imageModel) {
+        const images = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: category._id 
+        }).lean();
+        category.images = images;
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Category retrieved successfully',
+        data: category
+      });
+    } catch (error) {
+      console.error('Get category by ID error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
 }
 
 const categoryController = new CategoryController();
@@ -153,6 +282,7 @@ const categoryController = new CategoryController();
 module.exports = {
   createCategory: categoryController.create.bind(categoryController),
   getAllCategories: categoryController.getAll.bind(categoryController),
+  getCategoryById: categoryController.getById.bind(categoryController),
   updateCategory: categoryController.update.bind(categoryController),
   deleteCategory: categoryController.delete.bind(categoryController)
 };
