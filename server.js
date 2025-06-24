@@ -21,6 +21,7 @@ const paymentRoutes = require('./src/routes/paymentRoutes');
 
 // Thắng code
 
+const voucherRoutes = require('./src/routes/voucherRoutes');
 
 // Tri code
 
@@ -53,6 +54,9 @@ mongoose
   .catch((err) => console.error('MongoDB connection error:', err));
 
 app.use('/api/users', userRoutes);
+
+
+app.use('/api/vouchers', voucherRoutes);
 
 //pet
 app.use('/api/pets', petRoutes); 
