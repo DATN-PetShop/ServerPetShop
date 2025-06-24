@@ -10,9 +10,36 @@ const orderRoutes = require('./src/routes/orderRoutes');
 const breedRoutes = require('./src/routes/breedRoutes');
 const cartRoutes = require('./src/routes/cartRoutes');
 const paymentRoutes = require('./src/routes/paymentRoutes');
+
+
+
+// Lộc code
+
+
+
+
+
+
+// Thắng code
+
+const voucherRoutes = require('./src/routes/voucherRoutes');
+
+// Tri code
+
+
+// Đức code
+
+
+
+// Thủy code
+
+
+
+
 const addressRoutes = require('./src/routes/addressRoutes'); 
 const notificationRoutes = require('./src/routes/notificationRoutes'); 
 const bannerRoutes = require('./src/routes/bannerRoutes');
+
 
 
 
@@ -31,6 +58,9 @@ mongoose
   .catch((err) => console.error('MongoDB connection error:', err));
 
 app.use('/api/users', userRoutes);
+
+
+app.use('/api/vouchers', voucherRoutes);
 
 //pet
 app.use('/api/pets', petRoutes); 
