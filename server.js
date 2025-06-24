@@ -10,34 +10,12 @@ const orderRoutes = require('./src/routes/orderRoutes');
 const breedRoutes = require('./src/routes/breedRoutes');
 const cartRoutes = require('./src/routes/cartRoutes');
 const paymentRoutes = require('./src/routes/paymentRoutes');
-
-
-// Lộc code
-
-
-
-
-
-
-// Thắng code
-
-
-// Tri code
-
-
-// Đức code
-
-
-
-// Thủy code
-
-
-
-
-
-
 const addressRoutes = require('./src/routes/addressRoutes'); 
 const notificationRoutes = require('./src/routes/notificationRoutes'); 
+const bannerRoutes = require('./src/routes/bannerRoutes');
+
+
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -78,6 +56,8 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/notification', notificationRoutes); // Uncomment if you have notification routes
 app.use('/api/addresses', addressRoutes); // Uncomment if you have address routes
 
+
+app.use('/api/banners', bannerRoutes);
 
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
