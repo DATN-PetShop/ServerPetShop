@@ -19,4 +19,5 @@ router.get('/me', auth, getCurrentUser);
 router.get('/admin', auth, adminRoute);
 router.get('/staff', auth, staffRoute);
 
+
 module.exports = router;
