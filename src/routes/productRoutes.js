@@ -1,22 +1,28 @@
-// src/routes/productRoutes.js
+// productRoutes.js
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const requireRoles = require('../middleware/requireRole');
+const upload = require('../middleware/upload');
 const {
   createProduct,
   getAllProducts,
   updateProduct,
-  deleteProduct
+  deleteProduct,
+  searchProducts,
+  getFilterOptions
 } = require('../controllers/productController');
-const upload = require('../middleware/upload');
 
+// Public routes
 router.get('/', getAllProducts);
 
-router.post('/', auth, requireRoles(['Admin']), upload.array('images', 10), createProduct);
+// Search and filter routes
+router.get('/search', searchProducts);
+router.get('/filter-options', getFilterOptions);
 
-router.put('/:id', auth, requireRoles(['Admin']), upload.array('images', 10), updateProduct);
-
+// Admin/Staff routes
+router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createProduct);
+router.put('/:id', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), updateProduct);
 router.delete('/:id', auth, requireRoles(['Admin']), deleteProduct);
 
 module.exports = router;
