@@ -111,7 +111,7 @@ app.post('/create-vnpay-payment', (req, res) => {
     vnp_OrderInfo: 'Thanh toan don hang',
     vnp_OrderType: '250000',
     vnp_Locale: 'vn',
-    vnp_ReturnUrl: 'datnshopgiaypickup://payment-result',
+    vnp_ReturnUrl: 'petshop://payment-result', 
     vnp_IpAddr: req.ip || '127.0.0.1',
     vnp_CreateDate: new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14),
   };
@@ -139,9 +139,9 @@ app.listen(PORT, () => {
 });
 
 // Lắng nghe tất cả các địa chỉ IP
-app.listen(5000, '0.0.0.0', () => {
-  console.log('Server running on port 5000');
-  console.log('Access via:');
-  console.log('- Local: http://localhost:5000');
-  console.log('- Network: http://10.0.2.2:5000 (Android Emulator)');
-});
+// app.listen(5000, '0.0.0.0', () => {
+//   console.log('Server running on port 5000');
+//   console.log('Access via:');
+//   console.log('- Local: http://localhost:5000');
+//   console.log('- Network: http://10.0.2.2:5000 (Android Emulator)');
+// });
