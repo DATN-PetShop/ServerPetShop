@@ -10,46 +10,16 @@ const orderRoutes = require('./src/routes/orderRoutes');
 const breedRoutes = require('./src/routes/breedRoutes');
 const cartRoutes = require('./src/routes/cartRoutes');
 const paymentRoutes = require('./src/routes/paymentRoutes');
-
-
-
-// Lộc code
-
-
-
-
-
-
-// Thắng code
-
 const voucherRoutes = require('./src/routes/voucherRoutes');
-
-// Tri code
-
-
-// Đức code
-
-
-
-// Thủy code
-
-
-
-
 const addressRoutes = require('./src/routes/addressRoutes'); 
 const notificationRoutes = require('./src/routes/notificationRoutes'); 
 const bannerRoutes = require('./src/routes/bannerRoutes');
 
-
-
-
 const app = express();
-
 const crypto = require('crypto');
 // Cấu hình CORS
 app.use(cors());
 app.use(express.json());
-
 console.log('MONGODB_URI:', process.env.MONGODB_URI);
 
 mongoose
@@ -62,36 +32,20 @@ mongoose
 
 app.use('/api/users', userRoutes);
 
-
 app.use('/api/vouchers', voucherRoutes);
-
 //pet
 app.use('/api/pets', petRoutes); 
-
 // product
 app.use('/api/products', productRoutes);
-
 // categories
 app.use('/api/categories', categoryRoutes);
-
 app.use('/api/order', orderRoutes);
-
-
-
 app.use('/api/breeds', breedRoutes);
-
-
 app.use('/api/cart', cartRoutes); 
-
-
-// thuy code
 app.use('/api/payment', paymentRoutes);
 app.use('/api/notification', notificationRoutes); // Uncomment if you have notification routes
 app.use('/api/addresses', addressRoutes); // Uncomment if you have address routes
-
-
 app.use('/api/banners', bannerRoutes);
-
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
 });
@@ -111,7 +65,7 @@ app.post('/create-vnpay-payment', (req, res) => {
     vnp_OrderInfo: 'Thanh toan don hang',
     vnp_OrderType: '250000',
     vnp_Locale: 'vn',
-    vnp_ReturnUrl: 'petshop://payment-result', 
+    vnp_ReturnUrl: 'exp://192.168.0.103:8081/--/payment-result', // thay link expo của bn nếu test trên expo 
     vnp_IpAddr: req.ip || '127.0.0.1',
     vnp_CreateDate: new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14),
   };
@@ -137,11 +91,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
-// Lắng nghe tất cả các địa chỉ IP
-// app.listen(5000, '0.0.0.0', () => {
-//   console.log('Server running on port 5000');
-//   console.log('Access via:');
-//   console.log('- Local: http://localhost:5000');
-//   console.log('- Network: http://10.0.2.2:5000 (Android Emulator)');
-// });
