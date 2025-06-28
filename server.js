@@ -14,6 +14,7 @@ const voucherRoutes = require('./src/routes/voucherRoutes');
 const addressRoutes = require('./src/routes/addressRoutes'); 
 const notificationRoutes = require('./src/routes/notificationRoutes'); 
 const bannerRoutes = require('./src/routes/bannerRoutes');
+const vnpayRoutes = require('./src/routes/vnpayRoutes');
 
 const app = express();
 const crypto = require('crypto');
@@ -46,46 +47,10 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/notification', notificationRoutes); // Uncomment if you have notification routes
 app.use('/api/addresses', addressRoutes); // Uncomment if you have address routes
 app.use('/api/banners', bannerRoutes);
+app.use('/', vnpayRoutes);
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
 });
-
-// thanh toán VNPay
-app.post('/create-vnpay-payment', (req, res) => {
-  console.log('Received POST request:', req.body); // Log yêu cầu nhận được
-  const vnpUrl = 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html';
-  const secretKey = 'N4TNAZDJNSTUBR497MKXZH6KCQS3D9B2';
-  const vnpParams = {
-    vnp_Version: '2.1.0',
-    vnp_Command: 'pay',
-    vnp_TmnCode: 'VP0I8AWK',
-    vnp_Amount: req.body.amount * 100,
-    vnp_CurrCode: 'VND',
-    vnp_TxnRef: 'order_' + Date.now(),
-    vnp_OrderInfo: 'Thanh toan don hang',
-    vnp_OrderType: '250000',
-    vnp_Locale: 'vn',
-    vnp_ReturnUrl: 'exp://192.168.0.103:8081/--/payment-result', // thay link expo của bn nếu test trên expo 
-    vnp_IpAddr: req.ip || '127.0.0.1',
-    vnp_CreateDate: new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14),
-  };
-
-  const sortedParams = Object.keys(vnpParams).sort().reduce((acc, key) => {
-    acc[key] = vnpParams[key];
-    return acc;
-  }, {});
-  const signData = Object.keys(sortedParams)
-    .map(key => `${key}=${encodeURIComponent(sortedParams[key]).replace(/%20/g, '+')}`)
-    .join('&');
-  const hmac = crypto.createHmac('sha512', secretKey);
-  vnpParams.vnp_SecureHash = hmac.update(signData).digest('hex');
-
-  const querystring = new URLSearchParams(vnpParams).toString();
-  const paymentUrl = `${vnpUrl}?${querystring}`;
-  console.log('Generated paymentUrl:', paymentUrl); // Log URL được tạo
-  res.json({ paymentUrl });
-});
-
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
