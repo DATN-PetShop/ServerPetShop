@@ -278,10 +278,135 @@ const staffRoute = async (req, res) => {
   }
 };
 
+// @desc    Get all users
+// @route   GET /api/users
+// @access  Private (Admin only)
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find().select('-password_hash');
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'All users retrieved successfully',
+      data: { users }
+    });
+  } catch (error) {
+    console.error('Get all users error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+// @desc    Get user by ID
+// @route   GET /api/users/:id
+// @access  Private (Admin/Staff only)
+const getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id).select('-password_hash');
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'User retrieved successfully',
+      data: { user }
+    });
+  } catch (error) {
+    console.error('Get user by id error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+// @desc    Update user
+// @route   PUT /api/users/:id
+// @access  Private (Admin/Staff only)
+const updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = { ...req.body };
+    delete updateData.password_hash; // Không cho phép update password_hash trực tiếp
+    const updatedUser = await User.findByIdAndUpdate(id, updateData, { new: true }).select('-password_hash');
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'User updated successfully',
+      data: { user: updatedUser }
+    });
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+// @desc    Delete user
+// @route   DELETE /api/users/:id
+// @access  Private (Admin only)
+const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedUser = await User.findByIdAndDelete(id);
+    if (!deletedUser) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'User deleted successfully',
+      data: null
+    });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 module.exports = {
   registerUser,
   loginUser,
   getCurrentUser,
   adminRoute,
-  staffRoute
+  staffRoute,
+  getAllUsers,
+  getUserById,
+  updateUser,
+  deleteUser
 };

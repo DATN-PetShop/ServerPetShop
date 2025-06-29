@@ -6,7 +6,11 @@ const {
   loginUser,
   getCurrentUser,
   adminRoute,
-  staffRoute
+  staffRoute,
+  getAllUsers,
+  getUserById,
+  updateUser,
+  deleteUser
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 
@@ -19,5 +23,9 @@ router.get('/me', auth, getCurrentUser);
 router.get('/admin', auth, adminRoute);
 router.get('/staff', auth, staffRoute);
 
+router.get('/', auth, getAllUsers);
+router.get('/:id', auth, getUserById);
+router.put('/:id', auth, updateUser);
+router.delete('/:id', auth, deleteUser);
 
 module.exports = router;
