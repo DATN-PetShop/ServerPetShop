@@ -301,11 +301,46 @@ const getAllUsers = async (req, res) => {
     });
   }
 };
-
+// @desc    Update user
+// @route   PUT /api/users/:id
+// @access  Private (Admin/Staff only)
+const updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = { ...req.body };
+    delete updateData.password_hash; // Không cho phép update password_hash trực tiếp
+    const updatedUser = await User.findByIdAndUpdate(id, updateData, { new: true }).select('-password_hash');
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'User updated successfully',
+      data: { user: updatedUser }
+    });
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 module.exports = {
   registerUser,
   loginUser,
   getCurrentUser,
   adminRoute,
-  staffRoute
+  staffRoute,
+  getAllUsers,
+  updateUser,
 };

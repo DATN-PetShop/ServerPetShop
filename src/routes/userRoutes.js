@@ -8,6 +8,7 @@ const {
   adminRoute,
   staffRoute,
   getAllUsers,
+  updateUser,
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 
@@ -21,5 +22,5 @@ router.get('/admin', auth, adminRoute);
 router.get('/staff', auth, staffRoute);
 
 router.get('/', auth, getAllUsers);
-
+router.put('/:id', auth, updateUser);
 module.exports = router;
