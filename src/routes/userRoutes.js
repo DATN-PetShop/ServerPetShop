@@ -6,7 +6,8 @@ const {
   loginUser,
   getCurrentUser,
   adminRoute,
-  staffRoute
+  staffRoute,
+  getAllUsers,
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 
@@ -19,5 +20,6 @@ router.get('/me', auth, getCurrentUser);
 router.get('/admin', auth, adminRoute);
 router.get('/staff', auth, staffRoute);
 
+router.get('/', auth, getAllUsers);
 
 module.exports = router;

@@ -278,6 +278,30 @@ const staffRoute = async (req, res) => {
   }
 };
 
+// @desc    Get all users
+// @route   GET /api/users
+// @access  Private (Admin only)
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find().select('-password_hash');
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'All users retrieved successfully',
+      data: { users }
+    });
+  } catch (error) {
+    console.error('Get all users error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
