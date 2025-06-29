@@ -335,6 +335,38 @@ const updateUser = async (req, res) => {
     });
   }
 };
+// @desc    Delete user
+// @route   DELETE /api/users/:id
+// @access  Private (Admin only)
+const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedUser = await User.findByIdAndDelete(id);
+    if (!deletedUser) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'User deleted successfully',
+      data: null
+    });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 module.exports = {
   registerUser,
   loginUser,
@@ -343,4 +375,5 @@ module.exports = {
   staffRoute,
   getAllUsers,
   updateUser,
+  deleteUser
 };
