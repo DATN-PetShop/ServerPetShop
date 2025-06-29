@@ -301,6 +301,38 @@ const getAllUsers = async (req, res) => {
     });
   }
 };
+// @desc    Get user by ID
+// @route   GET /api/users/:id
+// @access  Private (Admin/Staff only)
+const getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id).select('-password_hash');
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'User retrieved successfully',
+      data: { user }
+    });
+  } catch (error) {
+    console.error('Get user by id error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 // @desc    Update user
 // @route   PUT /api/users/:id
 // @access  Private (Admin/Staff only)
@@ -374,6 +406,7 @@ module.exports = {
   adminRoute,
   staffRoute,
   getAllUsers,
+  getUserById,
   updateUser,
   deleteUser
 };

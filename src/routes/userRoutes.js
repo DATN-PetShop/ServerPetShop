@@ -8,6 +8,7 @@ const {
   adminRoute,
   staffRoute,
   getAllUsers,
+  getUserById,
   updateUser,
   deleteUser
 } = require('../controllers/userController');
@@ -23,6 +24,7 @@ router.get('/admin', auth, adminRoute);
 router.get('/staff', auth, staffRoute);
 
 router.get('/', auth, getAllUsers);
+router.get('/:id', auth, getUserById);
 router.put('/:id', auth, updateUser);
 router.delete('/:id', auth, deleteUser);
 
