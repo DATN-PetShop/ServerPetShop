@@ -23,9 +23,9 @@ router.get('/me', auth, getCurrentUser);
 router.get('/admin', auth, adminRoute);
 router.get('/staff', auth, staffRoute);
 
-router.get('/', auth, getAllUsers);
-router.get('/:id', auth, getUserById);
-router.put('/:id', auth, updateUser);
-router.delete('/:id', auth, deleteUser);
+router.get('/', auth,requireRoles(['Admin']), getAllUsers);
+router.get('/:id', auth,requireRoles(['Admin']), getUserById);
+router.put('/:id', auth,requireRoles(['Admin']), updateUser);
+router.delete('/:id', auth,requireRoles(['Admin']), deleteUser);
 
 module.exports = router;
