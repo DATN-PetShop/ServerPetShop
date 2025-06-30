@@ -12,8 +12,8 @@ const {
 } = require('../controllers/categoryController');
 
 // Public routes
-router.get('/', auth, getAllCategories); // Anyone can view categories
-router.get('/:id', auth, getCategoryById); 
+router.get('/',  getAllCategories); // Anyone can view categories
+router.get('/:id',  getCategoryById); 
 
 // Admin only routes - Thêm upload middleware để xử lý images
 router.post('/', auth, requireRoles(['Admin']), upload.array('images', 5), createCategory);
