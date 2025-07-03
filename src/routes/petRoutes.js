@@ -23,21 +23,22 @@ const {
   getSimilarBreeds,
   getBreedPopularityRanking,
   compareBreedPrices,
-  getBreedSearchSuggestions
+  getBreedSearchSuggestions,
+  getPetById // New function
 } = require('../controllers/petController');
 
-// search
+// Search
 router.get('/search', searchPets);
 router.get('/search/suggestions', searchSuggestions);
 router.get('/filter-options', getFilterOptions);
 
-//search by category
+// Search by category
 router.get('/search/category', searchPetsByCategory);      
 router.get('/trending/categories', getTrendingCategories);     
 router.post('/categories/compare', compareCategories);       
 router.get('/category/:categoryId/insights', getCategoryInsights); 
 
-//filter
+// Filter
 router.get('/breed/:breedId', getPetsByBreed);
 router.get('/breed/:breedId/statistics', getBreedStatistics);
 router.get('/category/:categoryId', getPetsByCategory);
@@ -52,7 +53,8 @@ router.get('/search/suggestions', searchSuggestions);
 router.get('/filter-options', getFilterOptions);
 
 // Public routes
-router.get('/', getAllPetsPublic); // all role có thể xem
+router.get('/', getAllPetsPublic); // All roles can view
+router.get('/:id', getPetById); // New endpoint to get a single pet
 
 // Admin routes
 router.get('/admin', auth, requireRoles(['Admin']), getAllPetsAdmin); 

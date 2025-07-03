@@ -86,21 +86,21 @@ class PetController extends BaseCrudController {
   async searchPets(req, res) {
     try {
       const {
-        keyword,        // tìm theo tên
-        type,          // loại thú cưng
-        breed_id,      // giống
-        gender,        // giới tính
-        status,        // trạng thái
-        minPrice,      // giá tối thiểu
-        maxPrice,      // giá tối đa
-        minAge,        // tuổi tối thiểu
-        maxAge,        // tuổi tối đa
-        minWeight,     // cân nặng tối thiểu
-        maxWeight,     // cân nặng tối đa
-        sortBy = 'created_at',  // sắp xếp theo
-        sortOrder = 'desc',     // thứ tự sắp xếp
-        page = 1,      // trang
-        limit = 10     // số lượng mỗi trang
+        keyword,
+        type,
+        breed_id,
+        gender,
+        status,
+        minPrice,
+        maxPrice,
+        minAge,
+        maxAge,
+        minWeight,
+        maxWeight,
+        sortBy = 'created_at',
+        sortOrder = 'desc',
+        page = 1,
+        limit = 10
       } = req.query;
 
       // Xây dựng query filter
@@ -907,15 +907,14 @@ class PetController extends BaseCrudController {
   async getTrendingCategories(req, res) {
     try {
       const {
-        days = 30,           // Tính trend trong X ngày qua
-        limit = 5,           // Top X categories
+        days = 30,
+        limit = 5,
         includeStats = true
       } = req.query;
 
       const daysAgo = new Date();
       daysAgo.setDate(daysAgo.getDate() - Number(days));
 
-      // Get categories with most pets added recently
       const trendingCategories = await this.model.aggregate([
         {
           $match: {
@@ -968,11 +967,9 @@ class PetController extends BaseCrudController {
         { $limit: Number(limit) }
       ]);
 
-      // Get additional stats if requested
       let additionalStats = {};
       if (includeStats === 'true') {
         for (let category of trendingCategories) {
-          // Get total pets in category (all time)
           const totalPets = await this.model.aggregate([
             {
               $lookup: {
@@ -1054,7 +1051,6 @@ class PetController extends BaseCrudController {
       const comparison = [];
 
       for (let categoryId of categoryIds) {
-        // Validate category exists
         const category = await mongoose.model('Category').findById(categoryId);
         if (!category) {
           return res.status(404).json({
@@ -1065,14 +1061,12 @@ class PetController extends BaseCrudController {
           });
         }
 
-        // Get breeds in this category
         const breeds = await mongoose.model('Breed').find({
           category_id: categoryId
         }).select('_id name');
 
         const breedIds = breeds.map(breed => breed._id);
 
-        // Get pets statistics
         const stats = await this.model.aggregate([
           {
             $match: {
@@ -1090,7 +1084,6 @@ class PetController extends BaseCrudController {
           }
         ]);
 
-        // Overall stats
         const overallStats = await this.model.aggregate([
           {
             $match: {
@@ -1110,7 +1103,6 @@ class PetController extends BaseCrudController {
           }
         ]);
 
-        // Price distribution
         const priceDistribution = await this.model.aggregate([
           {
             $match: {
@@ -1316,9 +1308,9 @@ class PetController extends BaseCrudController {
   async searchPetsByBreed(req, res) {
     try {
       const {
-        keyword,           // Tìm kiếm tên breed
-        breedIds,         // Có thể search nhiều breeds cùng lúc
-        categoryId,       // Filter breeds trong category cụ thể
+        keyword,
+        breedIds,
+        categoryId,
         minPrice,
         maxPrice,
         minAge,
@@ -1655,8 +1647,8 @@ class PetController extends BaseCrudController {
   async getBreedPopularityRanking(req, res) {
     try {
       const {
-        categoryId,       // Filter by category
-        timeframe = 30,   // Days to consider for popularity
+        categoryId,
+        timeframe = 30,
         limit = 10,
         includeStats = true
       } = req.query;
@@ -1722,9 +1714,9 @@ class PetController extends BaseCrudController {
           $addFields: {
             popularityScore: {
               $add: [
-                { $multiply: ['$petCount', 0.4] },      // 40% weight for total pets
-                { $multiply: ['$soldCount', 0.4] },     // 40% weight for sold pets
-                { $multiply: ['$availableCount', 0.2] } // 20% weight for available pets
+                { $multiply: ['$petCount', 0.4] },
+                { $multiply: ['$soldCount', 0.4] },
+                { $multiply: ['$availableCount', 0.2] }
               ]
             }
           }
@@ -2054,9 +2046,66 @@ class PetController extends BaseCrudController {
       });
     }
   }
+
+  // New method to get a single pet by ID
+  async getPetById(req, res) {
+    try {
+      const { id } = req.params;
+
+      // Validate the ID
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'Invalid pet ID format',
+          data: null
+        });
+      }
+
+      const pet = await this.model.findById(id)
+        .populate('breed_id', 'name description category_id')
+        .populate({
+          path: 'breed_id',
+          populate: {
+            path: 'category_id',
+            select: 'name description'
+          }
+        })
+        .populate('user_id', 'username email role')
+        .lean();
+
+      if (!pet) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Pet not found',
+          data: null
+        });
+      }
+
+      // Populate images
+      if (this.imageModel) {
+        const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+        pet.images = images;
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Pet retrieved successfully',
+        data: pet
+      });
+    } catch (error) {
+      console.error('Get pet by ID error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
 }
-
-
 
 const petController = new PetController();
 
@@ -2066,27 +2115,20 @@ module.exports = {
   getAllPetsAdmin: petController.getAllPetsAdmin.bind(petController),
   updatePet: petController.update.bind(petController),
   deletePet: petController.delete.bind(petController),
-  // FIX
   searchPets: petController.searchPets.bind(petController),
   searchSuggestions: petController.searchSuggestions.bind(petController),
   getFilterOptions: petController.getFilterOptions.bind(petController),
-
-  //new 
   getPetsByBreed: petController.getPetsByBreed.bind(petController),
   getPetsByCategory: petController.getPetsByCategory.bind(petController),
   getBreedStatistics: petController.getBreedStatistics.bind(petController),
-
-  //searchPetsByCategory
   searchPetsByCategory: petController.searchPetsByCategory.bind(petController),
   getTrendingCategories: petController.getTrendingCategories.bind(petController),
   compareCategories: petController.compareCategories.bind(petController),
   getCategoryInsights: petController.getCategoryInsights.bind(petController),
-
-  //
-
   searchPetsByBreed: petController.searchPetsByBreed.bind(petController),
   getSimilarBreeds: petController.getSimilarBreeds.bind(petController),
   getBreedPopularityRanking: petController.getBreedPopularityRanking.bind(petController),
   compareBreedPrices: petController.compareBreedPrices.bind(petController),
-  getBreedSearchSuggestions: petController.getBreedSearchSuggestions.bind(petController)
+  getBreedSearchSuggestions: petController.getBreedSearchSuggestions.bind(petController),
+  getPetById: petController.getPetById.bind(petController) // New export
 };
