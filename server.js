@@ -15,6 +15,7 @@ const addressRoutes = require('./src/routes/addressRoutes');
 const notificationRoutes = require('./src/routes/notificationRoutes'); 
 const bannerRoutes = require('./src/routes/bannerRoutes');
 const vnpayRoutes = require('./src/routes/vnpayRoutes');
+const orderItemRoutes = require('./src/routes/orderItemRoutes');
 
 const app = express();
 const crypto = require('crypto');
@@ -47,6 +48,7 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/notification', notificationRoutes); // Uncomment if you have notification routes
 app.use('/api/addresses', addressRoutes); // Uncomment if you have address routes
 app.use('/api/banners', bannerRoutes);
+app.use('/api/order_items', orderItemRoutes);
 app.use('/', vnpayRoutes);
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
