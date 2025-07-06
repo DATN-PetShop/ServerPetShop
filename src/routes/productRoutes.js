@@ -1,4 +1,3 @@
-// productRoutes.js
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
@@ -10,11 +9,13 @@ const {
   updateProduct,
   deleteProduct,
   searchProducts,
-  getFilterOptions
+  getFilterOptions,
+  getProductById // Thêm hàm mới
 } = require('../controllers/productController');
 
 // Public routes
 router.get('/', getAllProducts);
+router.get('/:id', getProductById); // Thêm route mới để lấy chi tiết sản phẩm
 
 // Search and filter routes
 router.get('/search', searchProducts);
