@@ -11,7 +11,7 @@ const requireRole = require('../middleware/requireRole');
 
 router.get('/', auth, getMyOrderItems);
 
-router.post('/', auth, requireRole(['Admin', 'Staff']), createOrderItem);
+router.post('/', auth,  createOrderItem);
 router.put('/:id', auth, requireRole(['Admin', 'Staff']), updateOrderItem);
 router.delete('/:id', auth, requireRole(['Admin']), deleteOrderItem);
 

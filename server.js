@@ -41,7 +41,7 @@ app.use('/api/pets', petRoutes);
 app.use('/api/products', productRoutes);
 // categories
 app.use('/api/categories', categoryRoutes);
-app.use('/api/order', orderRoutes);
+app.use('/api/orders', orderRoutes);
 app.use('/api/breeds', breedRoutes);
 app.use('/api/cart', cartRoutes); 
 app.use('/api/payment', paymentRoutes);
