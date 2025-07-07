@@ -30,8 +30,7 @@ const auth = async (req, res, next) => {
       });
     }
 
-    // Sửa đổi: Gán req.user với id từ user._id để khớp với req.user?.id trong saveVoucher
-    req.user = { id: user._id }; // Thay vì req.user = decoded
+    req.user = decoded;
     req.userData = user;
     
     next();
