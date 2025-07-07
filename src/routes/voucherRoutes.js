@@ -7,10 +7,11 @@ const {
   getAllVouchers,
   updateVoucher,
   deleteVoucher,
-  searchVouchers
+  searchVouchers,
+  saveVoucher
 } = require('../controllers/voucherController');
 
-router.get('/', getAllVouchers); // all roles can view
+router.get('/', getAllVouchers); // Tất cả vai trò có thể xem
 
 router.get('/admin', auth, requireRoles(['Admin']), getAllVouchers); 
 
@@ -19,5 +20,7 @@ router.put('/:id', auth, requireRoles(['Admin', 'Staff']), updateVoucher);
 router.delete('/:id', auth, requireRoles(['Admin']), deleteVoucher);
 
 router.get('/search', searchVouchers);
+
+router.post('/save/:voucherId', auth, saveVoucher); // Người dùng đã xác thực có thể lưu voucher
 
 module.exports = router;
