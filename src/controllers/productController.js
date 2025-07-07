@@ -1,4 +1,3 @@
-// productController.js
 const Product = require('../models/Product');
 const ProductImage = require('../models/ProductImage');
 const BaseCrudController = require('./baseCrudController');
@@ -19,6 +18,61 @@ class ProductController extends BaseCrudController {
 
   getImageForeignKey() {
     return 'product_id';
+  }
+
+  async getProductById(req, res) {
+    try {
+      const { id } = req.params;
+
+      // Kiểm tra ID hợp lệ
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'Invalid product ID',
+          data: null
+        });
+      }
+
+      // Tìm sản phẩm theo ID
+      const product = await this.model
+        .findById(id)
+        .populate('category_id', 'name description')
+        .populate('user_id', 'username email')
+        .lean();
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Product not found',
+          data: null
+        });
+      }
+
+      // Populate images cho sản phẩm
+      if (this.imageModel) {
+        const images = await this.imageModel
+          .find({ [this.getImageForeignKey()]: product._id })
+          .lean();
+        product.images = images;
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Product retrieved successfully',
+        data: product
+      });
+    } catch (error) {
+      console.error('Get product by ID error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
   }
 
   async searchProducts(req, res) {
@@ -174,5 +228,6 @@ module.exports = {
   updateProduct: productController.update.bind(productController),
   deleteProduct: productController.delete.bind(productController),
   searchProducts: productController.searchProducts.bind(productController),
-  getFilterOptions: productController.getFilterOptions.bind(productController)
+  getFilterOptions: productController.getFilterOptions.bind(productController),
+  getProductById: productController.getProductById.bind(productController) // Thêm export hàm mới
 };
