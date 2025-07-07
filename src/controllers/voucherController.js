@@ -8,11 +8,52 @@ class VoucherController extends BaseCrudController {
   }
 
   getRequiredFields() {
-    return ['discount_type', 'min_purchase_amount', 'expiry_date', 'user_id', 'category_id'];
+    return ['discount_type', 'min_purchase_amount', 'expiry_date', 'category_id']; // Loại bỏ user_id
   }
 
   getEntityName() {
     return 'Voucher';
+  }
+
+  async create(req, res) {
+    try {
+      const body = req.body;
+      const requiredFields = this.getRequiredFields();
+      const missingFields = requiredFields.filter(field => !body[field]);
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: `${missingFields.join(', ')} is required`,
+          data: null
+        });
+      }
+
+      // Gán user_id và created_by từ req.user.id (từ token)
+      const voucherData = {
+        ...body,
+        user_id: body.user_id || req.user.id, // Sử dụng req.user.id nếu user_id không có trong body
+        created_by: req.user.id,
+      };
+
+      const voucher = new this.model(voucherData);
+      await voucher.save();
+
+      res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: 'Tạo voucher thành công',
+        data: voucher
+      });
+    } catch (error) {
+      console.error('Lỗi khi tạo voucher:', error);
+      res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: error.message || 'Lỗi khi tạo voucher',
+        data: null
+      });
+    }
   }
 
   async getAllVouchers(req, res) {
@@ -113,7 +154,7 @@ class VoucherController extends BaseCrudController {
   async saveVoucher(req, res) {
     try {
       const { voucherId } = req.params;
-      const userId = req.user?.id; // Lấy ID người dùng từ middleware auth
+      const userId = req.user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -161,7 +202,6 @@ class VoucherController extends BaseCrudController {
         });
       }
 
-      // Thêm userId vào saved_by_users thay vì gán lại user_id
       if (!voucher.saved_by_users) {
         voucher.saved_by_users = [];
       }
