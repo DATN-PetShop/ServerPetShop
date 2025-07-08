@@ -83,145 +83,166 @@ class PetController extends BaseCrudController {
     }
   }
 
-  async searchPets(req, res) {
-    try {
-      const {
-        keyword,
-        type,
-        breed_id,
-        gender,
-        status,
-        minPrice,
-        maxPrice,
-        minAge,
-        maxAge,
-        minWeight,
-        maxWeight,
-        sortBy = 'created_at',
-        sortOrder = 'desc',
-        page = 1,
-        limit = 10
-      } = req.query;
+async searchPets(req, res) {
+  try {
+    const {
+      keyword,        // Từ frontend mới
+      q,              // Từ frontend cũ (backward compatibility)
+      type,           // Loại thú cưng (Dog, Cat, etc.)
+      breed_id,       // ID của giống
+      gender,         // Giới tính
+      status = 'available', // Trạng thái
+      minPrice,       // Giá tối thiểu
+      maxPrice,       // Giá tối đa
+      minAge,         // Tuổi tối thiểu
+      maxAge,         // Tuổi tối đa
+      minWeight,      // Cân nặng tối thiểu
+      maxWeight,      // Cân nặng tối đa
+      sortBy = 'created_at', // Sắp xếp theo
+      sortOrder = 'desc',    // Thứ tự sắp xếp
+      page = 1,       // Trang hiện tại
+      limit = 10      // Số lượng pets mỗi trang
+    } = req.query;
 
-      // Xây dựng query filter
-      const filter = {};
+    // ✅ Support cả 'keyword' và 'q' parameter
+    const searchTerm = keyword || q;
+    
+    console.log('🔍 Pet Search API called with:', {
+      searchTerm,
+      type,
+      breed_id,
+      gender,
+      status,
+      page,
+      limit
+    });
 
-      // Tìm kiếm theo keyword (tên hoặc mô tả)
-      if (keyword) {
-        filter.$or = [
-          { name: { $regex: keyword, $options: 'i' } },
-          { description: { $regex: keyword, $options: 'i' } }
-        ];
-      }
+    // Xây dựng query filter
+    const filter = {};
 
-      // Lọc theo type
-      if (type) {
-        filter.type = { $regex: type, $options: 'i' };
-      }
-
-      // Lọc theo breed_id
-      if (breed_id) {
-        filter.breed_id = breed_id;
-      }
-
-      // Lọc theo gender
-      if (gender) {
-        filter.gender = gender;
-      }
-
-      // Lọc theo status
-      if (status) {
-        filter.status = status;
-      }
-
-      // Lọc theo khoảng giá
-      if (minPrice || maxPrice) {
-        filter.price = {};
-        if (minPrice) filter.price.$gte = Number(minPrice);
-        if (maxPrice) filter.price.$lte = Number(maxPrice);
-      }
-
-      // Lọc theo khoảng tuổi
-      if (minAge || maxAge) {
-        filter.age = {};
-        if (minAge) filter.age.$gte = Number(minAge);
-        if (maxAge) filter.age.$lte = Number(maxAge);
-      }
-
-      // Lọc theo khoảng cân nặng
-      if (minWeight || maxWeight) {
-        filter.weight = {};
-        if (minWeight) filter.weight.$gte = Number(minWeight);
-        if (maxWeight) filter.weight.$lte = Number(maxWeight);
-      }
-
-      // Xây dựng sort object
-      const sort = {};
-      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
-
-      const skip = (Number(page) - 1) * Number(limit);
-
-      const pets = await this.model.find(filter)
-        .populate('breed_id', 'name description')
-        .populate('user_id', 'username email')
-        .sort(sort)
-        .skip(skip)
-        .limit(Number(limit))
-        .lean();
-
-      // Đếm tổng số kết quả
-      const totalCount = await this.model.countDocuments(filter);
-
-      // Populate images cho mỗi pet
-      if (this.imageModel) {
-        for (let pet of pets) {
-          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
-          pet.images = images;
-        }
-      }
-
-      // Tính toán thông tin pagination
-      const totalPages = Math.ceil(totalCount / Number(limit));
-      const hasNextPage = Number(page) < totalPages;
-      const hasPrevPage = Number(page) > 1;
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Search completed successfully',
-        data: {
-          pets,
-          pagination: {
-            currentPage: Number(page),
-            totalPages,
-            totalCount,
-            hasNextPage,
-            hasPrevPage,
-            limit: Number(limit)
-          },
-          filters: {
-            keyword,
-            type,
-            breed_id,
-            gender,
-            status,
-            priceRange: { min: minPrice, max: maxPrice },
-            ageRange: { min: minAge, max: maxAge },
-            weightRange: { min: minWeight, max: maxWeight }
-          }
-        }
-      });
-
-    } catch (error) {
-      console.error('Search pets error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
+    // Tìm kiếm theo keyword (tên hoặc mô tả)
+    if (searchTerm) {
+      filter.$or = [
+        { name: { $regex: searchTerm, $options: 'i' } },
+        { description: { $regex: searchTerm, $options: 'i' } }
+      ];
     }
+
+    // Lọc theo type
+    if (type) {
+      filter.type = { $regex: type, $options: 'i' };
+    }
+
+    // Lọc theo breed_id
+    if (breed_id) {
+      filter.breed_id = breed_id;
+    }
+
+    // Lọc theo gender
+    if (gender) {
+      filter.gender = gender;
+    }
+
+    // Lọc theo status
+    if (status) {
+      filter.status = status;
+    }
+
+    // Lọc theo khoảng giá
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
+
+    // Lọc theo khoảng tuổi
+    if (minAge || maxAge) {
+      filter.age = {};
+      if (minAge) filter.age.$gte = Number(minAge);
+      if (maxAge) filter.age.$lte = Number(maxAge);
+    }
+
+    // Lọc theo khoảng cân nặng
+    if (minWeight || maxWeight) {
+      filter.weight = {};
+      if (minWeight) filter.weight.$gte = Number(minWeight);
+      if (maxWeight) filter.weight.$lte = Number(maxWeight);
+    }
+
+    // Xây dựng sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const pets = await this.model.find(filter)
+      .populate('breed_id', 'name description')
+      .populate('user_id', 'username email')
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    // Đếm tổng số kết quả
+    const totalCount = await this.model.countDocuments(filter);
+
+    // Populate images cho mỗi pet
+    if (this.imageModel) {
+      for (let pet of pets) {
+        const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+        pet.images = images;
+      }
+    }
+
+    // Tính toán thông tin pagination
+    const totalPages = Math.ceil(totalCount / Number(limit));
+    const hasNextPage = Number(page) < totalPages;
+    const hasPrevPage = Number(page) > 1;
+
+    console.log('✅ Pet Search Results:', {
+      petsFound: pets.length,
+      totalCount,
+      currentPage: page,
+      totalPages
+    });
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Search completed successfully',
+      data: {
+        pets,
+        pagination: {
+          currentPage: Number(page),
+          totalPages,
+          totalCount,
+          hasNextPage,
+          hasPrevPage,
+          limit: Number(limit)
+        },
+        filters: {
+          keyword: searchTerm,
+          type,
+          breed_id,
+          gender,
+          status,
+          priceRange: { min: minPrice, max: maxPrice },
+          ageRange: { min: minAge, max: maxAge },
+          weightRange: { min: minWeight, max: maxWeight }
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Search pets error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
   }
+}
 
   // Tìm kiếm gợi ý (suggestions)
   async searchSuggestions(req, res) {

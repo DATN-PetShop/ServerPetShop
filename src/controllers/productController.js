@@ -76,109 +76,130 @@ class ProductController extends BaseCrudController {
   }
 
   async searchProducts(req, res) {
-    try {
-      const {
-        keyword,        // Tìm kiếm theo tên hoặc mô tả
-        categoryId,    // Lọc theo danh mục
-        status,        // Lọc theo trạng thái
-        minPrice,      // Giá tối thiểu
-        maxPrice,      // Giá tối đa
-        sortBy = 'created_at', // Sắp xếp theo
-        sortOrder = 'desc',    // Thứ tự sắp xếp
-        page = 1,      // Trang hiện tại
-        limit = 10     // Số lượng sản phẩm mỗi trang
-      } = req.query;
+  try {
+    const {
+      keyword,        // Từ frontend mới
+      q,              // Từ frontend cũ (backward compatibility)
+      categoryId,     // Lọc theo danh mục
+      status,         // Lọc theo trạng thái
+      minPrice,       // Giá tối thiểu
+      maxPrice,       // Giá tối đa
+      sortBy = 'created_at', // Sắp xếp theo
+      sortOrder = 'desc',    // Thứ tự sắp xếp
+      page = 1,       // Trang hiện tại
+      limit = 10      // Số lượng sản phẩm mỗi trang
+    } = req.query;
 
-      // Xây dựng query filter
-      const filter = {};
+    // ✅ Support cả 'keyword' và 'q' parameter
+    const searchTerm = keyword || q;
+    
+    console.log('🔍 Product Search API called with:', {
+      searchTerm,
+      categoryId,
+      status,
+      minPrice,
+      maxPrice,
+      page,
+      limit
+    });
 
-      // Tìm kiếm theo keyword (tên hoặc mô tả)
-      if (keyword) {
-        filter.$or = [
-          { name: { $regex: keyword, $options: 'i' } },
-          { description: { $regex: keyword, $options: 'i' } }
-        ];
-      }
+    // Xây dựng query filter
+    const filter = {};
 
-      // Lọc theo categoryId
-      if (categoryId) {
-        filter.category_id = categoryId;
-      }
-
-      // Lọc theo status
-      if (status) {
-        filter.status = status;
-      }
-
-      // Lọc theo khoảng giá
-      if (minPrice || maxPrice) {
-        filter.price = {};
-        if (minPrice) filter.price.$gte = Number(minPrice);
-        if (maxPrice) filter.price.$lte = Number(maxPrice);
-      }
-
-      // Xây dựng sort object
-      const sort = {};
-      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
-
-      const skip = (Number(page) - 1) * Number(limit);
-
-      const products = await this.model.find(filter)
-        .populate('category_id', 'name description')
-        .populate('user_id', 'username email')
-        .sort(sort)
-        .skip(skip)
-        .limit(Number(limit))
-        .lean();
-
-      // Đếm tổng số kết quả
-      const totalCount = await this.model.countDocuments(filter);
-
-      // Populate images cho mỗi product
-      if (this.imageModel) {
-        for (let product of products) {
-          const images = await this.imageModel.find({ [this.getImageForeignKey()]: product._id }).lean();
-          product.images = images;
-        }
-      }
-
-      // Tính toán thông tin pagination
-      const totalPages = Math.ceil(totalCount / Number(limit));
-      const hasNextPage = Number(page) < totalPages;
-      const hasPrevPage = Number(page) > 1;
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Search products completed successfully',
-        data: {
-          products,
-          pagination: {
-            currentPage: Number(page),
-            totalPages,
-            totalCount,
-            hasNextPage,
-            hasPrevPage,
-            limit: Number(limit)
-          },
-          filters: {
-            keyword,
-            categoryId,
-            status,
-            priceRange: { min: minPrice, max: maxPrice }
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Search products error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
+    // Tìm kiếm theo keyword (tên hoặc mô tả)
+    if (searchTerm) {
+      filter.$or = [
+        { name: { $regex: searchTerm, $options: 'i' } },
+        { description: { $regex: searchTerm, $options: 'i' } }
+      ];
     }
+
+    // Lọc theo categoryId
+    if (categoryId) {
+      filter.category_id = categoryId;
+    }
+
+    // Lọc theo status
+    if (status) {
+      filter.status = status;
+    }
+
+    // Lọc theo khoảng giá
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
+
+    // Xây dựng sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const products = await this.model.find(filter)
+      .populate('category_id', 'name description')
+      .populate('user_id', 'username email')
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    // Đếm tổng số kết quả
+    const totalCount = await this.model.countDocuments(filter);
+
+    // Populate images cho mỗi product
+    if (this.imageModel) {
+      for (let product of products) {
+        const images = await this.imageModel.find({ [this.getImageForeignKey()]: product._id }).lean();
+        product.images = images;
+      }
+    }
+
+    // Tính toán thông tin pagination
+    const totalPages = Math.ceil(totalCount / Number(limit));
+    const hasNextPage = Number(page) < totalPages;
+    const hasPrevPage = Number(page) > 1;
+
+    console.log('✅ Product Search Results:', {
+      productsFound: products.length,
+      totalCount,
+      currentPage: page,
+      totalPages
+    });
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Search products completed successfully',
+      data: {
+        products,
+        pagination: {
+          currentPage: Number(page),
+          totalPages,
+          totalCount,
+          hasNextPage,
+          hasPrevPage,
+          limit: Number(limit)
+        },
+        filters: {
+          keyword: searchTerm,
+          categoryId,
+          status,
+          priceRange: { min: minPrice, max: maxPrice }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Search products error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
   }
+}
 
   async getFilterOptions(req, res) {
     try {
