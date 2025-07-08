@@ -6,7 +6,8 @@ const {
   getMyOrders,
   getOrderById,
   updateOrder,
-  deleteOrder
+  deleteOrder,
+  saveVnpayOrder
 } = require('../controllers/orderController');
 const requireRole = require('../middleware/requireRole');
 
@@ -18,5 +19,5 @@ router.get('/:id', auth, getOrderById); // Get single order by ID
 router.post('/', auth, createOrder); // Create new order
 router.put('/:id', auth, requireRole(['Admin', 'Staff']), updateOrder); // Update order
 router.delete('/:id', auth, requireRole(['Admin']), deleteOrder); // Delete order
-
+router.post('/vnpay', saveVnpayOrder);
 module.exports = router;
