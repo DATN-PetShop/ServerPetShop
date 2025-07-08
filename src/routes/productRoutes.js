@@ -1,3 +1,4 @@
+// src/routes/productRoutes.js - SỬA THỨ TỰ ROUTE
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
@@ -10,16 +11,16 @@ const {
   deleteProduct,
   searchProducts,
   getFilterOptions,
-  getProductById // Thêm hàm mới
+  getProductById
 } = require('../controllers/productController');
+
+// ✅ QUAN TRỌNG: Đặt route cụ thể TRƯỚC route động /:id
+router.get('/search', searchProducts);           // ✅ Đặt trước /:id
+router.get('/filter-options', getFilterOptions); // ✅ Đặt trước /:id
 
 // Public routes
 router.get('/', getAllProducts);
-router.get('/:id', getProductById); // Thêm route mới để lấy chi tiết sản phẩm
-
-// Search and filter routes
-router.get('/search', searchProducts);
-router.get('/filter-options', getFilterOptions);
+router.get('/:id', getProductById);              // ✅ Đặt cuối cùng
 
 // Admin/Staff routes
 router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createProduct);

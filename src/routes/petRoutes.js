@@ -1,3 +1,4 @@
+// src/routes/petRoutes.js - SỬA THỨ TỰ ROUTE
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
@@ -24,40 +25,36 @@ const {
   getBreedPopularityRanking,
   compareBreedPrices,
   getBreedSearchSuggestions,
-  getPetById // New function
+  getPetById
 } = require('../controllers/petController');
 
-// Search
-router.get('/search', searchPets);
-router.get('/search/suggestions', searchSuggestions);
-router.get('/filter-options', getFilterOptions);
+// ✅ QUAN TRỌNG: Đặt route cụ thể TRƯỚC route động /:id
+router.get('/search', searchPets);                      // ✅ Đặt trước /:id
+router.get('/search/suggestions', searchSuggestions);   // ✅ Đặt trước /:id
+router.get('/filter-options', getFilterOptions);       // ✅ Đặt trước /:id
+router.get('/search/category', searchPetsByCategory);   // ✅ Đặt trước /:id
+router.get('/search/breed', searchPetsByBreed);         // ✅ Đặt trước /:id
+router.get('/search/breed/suggestions', getBreedSearchSuggestions); // ✅ Đặt trước /:id
 
-// Search by category
-router.get('/search/category', searchPetsByCategory);      
-router.get('/trending/categories', getTrendingCategories);     
-router.post('/categories/compare', compareCategories);       
-router.get('/category/:categoryId/insights', getCategoryInsights); 
+// Trending và insights routes
+router.get('/trending/categories', getTrendingCategories);
+router.post('/categories/compare', compareCategories);
+router.get('/category/:categoryId/insights', getCategoryInsights);
 
-// Filter
+// Filter routes
 router.get('/breed/:breedId', getPetsByBreed);
 router.get('/breed/:breedId/statistics', getBreedStatistics);
+router.get('/breed/:breedId/similar', getSimilarBreeds);
+router.get('/breeds/popularity', getBreedPopularityRanking);
+router.post('/breeds/compare-prices', compareBreedPrices);
 router.get('/category/:categoryId', getPetsByCategory);
 
-router.get('/search/breed', searchPetsByBreed);               
-router.get('/search/breed/suggestions', getBreedSearchSuggestions); 
-router.get('/breed/:breedId/similar', getSimilarBreeds);     
-router.get('/breeds/popularity', getBreedPopularityRanking); 
-router.post('/breeds/compare-prices', compareBreedPrices);  
-router.get('/search', searchPets);
-router.get('/search/suggestions', searchSuggestions);
-router.get('/filter-options', getFilterOptions);
-
 // Public routes
-router.get('/', getAllPetsPublic); // All roles can view
-router.get('/:id', getPetById); // New endpoint to get a single pet
+router.get('/', getAllPetsPublic);                      // ✅ Tất cả routes cụ thể ở trên
+router.get('/:id', getPetById);                         // ✅ Đặt cuối cùng
 
 // Admin routes
-router.get('/admin', auth, requireRoles(['Admin']), getAllPetsAdmin); 
+router.get('/admin', auth, requireRoles(['Admin']), getAllPetsAdmin);
 
 // CRUD routes (Admin/Staff only)
 router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createPet);
