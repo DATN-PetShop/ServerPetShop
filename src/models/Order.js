@@ -11,6 +11,19 @@ const orderSchema = new mongoose.Schema({
     enum: ['pending', 'processing', 'completed', 'cancelled'],
     default: 'pending'
   },
+  payment_method: {
+    type: String,
+    enum: ['cod', 'vnpay'],
+    required: true // Thêm trường để lưu phương thức thanh toán
+  },
+  vnpay_transaction_id: {
+    type: String,
+    required: false // Lưu mã giao dịch VNPay (nếu có)
+  },
+  payment_date: {
+    type: String,
+    required: false // Lưu thời gian thanh toán từ VNPay (nếu có)
+  },
   created_at: {
     type: Date,
     default: Date.now

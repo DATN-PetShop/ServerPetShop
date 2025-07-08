@@ -13,7 +13,7 @@ const orderItemSchema = new mongoose.Schema({
   pet_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Pet',
-    required: true
+    required: false // Bỏ required
   },
   order_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -23,7 +23,7 @@ const orderItemSchema = new mongoose.Schema({
   product_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product',
-    required: true
+    required: false // Bỏ required
   },
   addresses_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -40,7 +40,14 @@ const orderItemSchema = new mongoose.Schema({
   }
 });
 
-orderItemSchema.pre('save', function(next) {
+// Hook để kiểm tra rằng ít nhất một trong hai trường pet_id hoặc product_id phải tồn tại
+orderItemSchema.pre('save', function (next) {
+  if (!this.pet_id && !this.product_id) {
+    return next(new Error('At least one of pet_id or product_id must be provided'));
+  }
+  if (this.pet_id && this.product_id) {
+    return next(new Error('Only one of pet_id or product_id can be provided'));
+  }
   this.updated_at = Date.now();
   next();
 });

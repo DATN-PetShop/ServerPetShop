@@ -6,24 +6,33 @@ const createOrderItem = async (req, res) => {
   try {
     const { quantity, unit_price, pet_id, order_id, product_id, addresses_id } = req.body;
 
-    if (!quantity || !unit_price || !pet_id || !order_id || !product_id || !addresses_id) {
-      return res.status(400).json({ message: 'Missing required fields' });
+    // Kiểm tra các trường bắt buộc
+    if (!quantity || !unit_price || !order_id || !addresses_id) {
+      return res.status(400).json({ message: 'Missing required fields: quantity, unit_price, order_id, or addresses_id' });
     }
 
-    const orderItem = new OrderItem({ 
+    // Kiểm tra rằng chỉ một trong hai trường pet_id hoặc product_id được cung cấp
+    if (!pet_id && !product_id) {
+      return res.status(400).json({ message: 'At least one of pet_id or product_id must be provided' });
+    }
+    if (pet_id && product_id) {
+      return res.status(400).json({ message: 'Only one of pet_id or product_id can be provided' });
+    }
+
+    const orderItem = new OrderItem({
       quantity,
       unit_price,
-      pet_id,
+      pet_id: pet_id || null,
       order_id,
-      product_id,
+      product_id: product_id || null,
       addresses_id
     });
 
     const savedOrderItem = await orderItem.save();
     res.status(201).json({ message: 'Order item created', data: savedOrderItem });
   } catch (error) {
-    console.error('Create order item error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('Create order item error:', error.message);
+    res.status(500).json({ message: error.message || 'Internal server error' });
   }
 };
 

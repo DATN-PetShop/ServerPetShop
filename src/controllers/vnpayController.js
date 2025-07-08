@@ -1,6 +1,36 @@
 const crypto = require('crypto');
+const Order = require('../models/Order');
 
-exports.createVnpayPayment = (req, res) => {
+const handleVnpayReturn = async (req, res) => {
+  try {
+    const vnpayData = req.query;
+    const secretKey = process.env.VNPAY_SECRET_KEY;
+
+    if (!verifyVnpaySignature(vnpayData, secretKey)) {
+      return res.status(400).json({ message: 'Invalid signature' });
+    }
+
+    if (vnpayData.vnp_ResponseCode !== '00' || vnpayData.vnp_TransactionStatus !== '00') {
+      return res.status(400).json({ message: 'Payment failed' });
+    }
+
+    const order = new Order({
+      total_amount: vnpayData.vnp_Amount / 100,
+      status: 'completed',
+      payment_method: 'vnpay',
+      vnpay_transaction_id: vnpayData.vnp_TxnRef,
+      payment_date: vnpayData.vnp_PayDate,
+      user_id: req.user.userId // Giả sử bạn có middleware xác thực
+    });
+
+    const savedOrder = await order.save();
+    res.status(200).json({ message: 'Order saved', data: savedOrder });
+  } catch (error) {
+    console.error('Handle VNPay return error:', error.message);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+const createVnpayPayment = (req, res) => {
   const vnpUrl = process.env.VNPAY_URL;
   const secretKey = process.env.VNPAY_SECRET_KEY;
   const vnpParams = {
@@ -32,3 +62,26 @@ exports.createVnpayPayment = (req, res) => {
   const paymentUrl = `${vnpUrl}?${querystring}`;
   res.json({ paymentUrl });
 }; 
+
+const verifyVnpaySignature = (vnpayData, secretKey) => {
+  const secureHash = vnpayData.vnp_SecureHash;
+  delete vnpayData.vnp_SecureHash;
+
+  const sortedParams = Object.keys(vnpayData).sort().reduce((acc, key) => {
+    acc[key] = vnpayData[key];
+    return acc;
+  }, {});
+  const signData = Object.keys(sortedParams)
+    .map(key => `${key}=${encodeURIComponent(sortedParams[key]).replace(/%20/g, '+')}`)
+    .join('&');
+  const hmac = crypto.createHmac('sha512', secretKey);
+  const calculatedHash = hmac.update(signData).digest('hex');
+
+  return secureHash === calculatedHash;
+};
+
+module.exports = {
+  handleVnpayReturn,
+  verifyVnpaySignature,
+  createVnpayPayment
+};
