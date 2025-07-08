@@ -20,6 +20,9 @@ const addressRoutes = require('./src/routes/addressRoutes');
 const notificationRoutes = require('./src/routes/notificationRoutes'); 
 const bannerRoutes = require('./src/routes/bannerRoutes');
 const chatRoutes = require('./src/routes/chatRoutes');
+const vnpayRoutes = require('./src/routes/vnpayRoutes');
+const orderItemRoutes = require('./src/routes/orderItemRoutes');
+const favouriteRoutes = require('./src/routes/favouriteRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -54,7 +57,7 @@ app.use('/api/vouchers', voucherRoutes);
 app.use('/api/pets', petRoutes); 
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
-app.use('/api/order', orderRoutes);
+app.use('/api/orders', orderRoutes);
 app.use('/api/breeds', breedRoutes);
 app.use('/api/cart', cartRoutes); 
 app.use('/api/payment', paymentRoutes);
@@ -63,6 +66,9 @@ app.use('/api/addresses', addressRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/chat', chatRoutes);
 
+app.use('/api/order_items', orderItemRoutes);
+app.use('/', vnpayRoutes);
+app.use('/api/favourites', favouriteRoutes);
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
 });

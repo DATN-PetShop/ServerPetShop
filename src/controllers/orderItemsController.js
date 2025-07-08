@@ -1,5 +1,7 @@
 const OrderItem = require('../models/OrderItem');
-
+const Order = require('../models/Order');
+const ProductImage = require('../models/ProductImage');
+const Image = require('../models/ImagePet');
 const createOrderItem = async (req, res) => {
   try {
     const { quantity, unit_price, pet_id, order_id, product_id, addresses_id } = req.body;
@@ -14,8 +16,7 @@ const createOrderItem = async (req, res) => {
       pet_id,
       order_id,
       product_id,
-      addresses_id,
-      user_id: req.user.userId
+      addresses_id
     });
 
     const savedOrderItem = await orderItem.save();
@@ -28,7 +29,28 @@ const createOrderItem = async (req, res) => {
 
 const getMyOrderItems = async (req, res) => {
   try {
-    const orderItems = await OrderItem.find({ user_id: req.user.userId }).lean();
+    // Bước 1: Tìm tất cả Order của người dùng
+    const orders = await Order.find({ user_id: req.user.userId }).select('_id').lean();
+    const orderIds = orders.map(order => order._id);
+
+    // Bước 2: Tìm OrderItems có order_id trong danh sách orderIds
+    const orderItems = await OrderItem.find({ order_id: { $in: orderIds } })
+      .populate('pet_id', 'name price')
+      .populate('product_id', 'name price')
+      .populate('addresses_id', 'address')
+      .populate('order_id', 'total_amount status')
+      .lean();
+     // Populate images
+      for (let item of orderItems) {
+        if (item.pet_id) {
+          const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
+          item.pet_id.images = petImages;
+        }
+        if (item.product_id) {
+          const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
+          item.product_id.images = productImages;
+        }
+      }
     res.status(200).json({ data: orderItems });
   } catch (error) {
     console.error('Fetch order items error:', error);

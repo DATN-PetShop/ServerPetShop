@@ -30,11 +30,6 @@ const orderItemSchema = new mongoose.Schema({
     ref: 'Address',
     required: true
   },
-  user_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
   created_at: {
     type: Date,
     default: Date.now
