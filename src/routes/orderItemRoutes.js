@@ -8,13 +8,14 @@ const {
   getOrderItemById,
   updateOrderItem,
   deleteOrderItem,
-  getOrderItemsByOrderId // Thêm hàm mới
+  getOrderItemsByOrderId,
+  searchOrderItems // Thêm hàm mới
 } = require('../controllers/orderItemsController');
 const requireRole = require('../middleware/requireRole');
 
 router.get('/', auth, getMyOrderItems);
-// router.get('/:id', auth, getOrderItemById);
-router.get('/by-order/:orderId', auth, getOrderItemsByOrderId); // Thêm tuyến đường mới
+router.get('/by-order/:orderId', auth, getOrderItemsByOrderId);
+router.get('/search', auth, searchOrderItems); // Thêm tuyến đường tìm kiếm
 router.post('/', auth, createOrderItem);
 router.put('/:id', auth, requireRole(['Admin', 'Staff']), updateOrderItem);
 router.delete('/:id', auth, requireRole(['Admin']), deleteOrderItem);
