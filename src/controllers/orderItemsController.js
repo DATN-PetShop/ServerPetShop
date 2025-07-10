@@ -2,6 +2,7 @@ const OrderItem = require('../models/OrderItem');
 const Order = require('../models/Order');
 const ProductImage = require('../models/ProductImage');
 const Image = require('../models/ImagePet');
+
 const createOrderItem = async (req, res) => {
   try {
     const { quantity, unit_price, pet_id, order_id, product_id, addresses_id } = req.body;
@@ -67,6 +68,49 @@ const getMyOrderItems = async (req, res) => {
   }
 };
 
+// orderItemsController.js
+const getOrderItemsByOrderId = async (req, res) => {
+  try {
+    const orderId = req.params.orderId;
+
+    // Kiểm tra xem orderId có hợp lệ không
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    // Kiểm tra quyền truy cập
+    if (order.user_id.toString() !== req.user.userId && !['Admin', 'Staff'].includes(req.user.role)) {
+      return res.status(403).json({ message: 'Not authorized to access these order items' });
+    }
+
+    // Lấy danh sách các mục đơn hàng
+    const orderItems = await OrderItem.find({ order_id: orderId })
+      .populate('pet_id', 'name price')
+      .populate('product_id', 'name price')
+      .populate('addresses_id', 'name phone note province district ward postal_code country')
+      .populate('order_id', 'total_amount status')
+      .lean();
+    // Populate images
+    for (let item of orderItems) {
+      if (item.pet_id) {
+        const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
+        item.pet_id.images = petImages;
+      }
+      if (item.product_id) {
+        const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
+        item.product_id.images = productImages;
+      }
+    }
+
+    // Trả về mảng rỗng nếu không có mục đơn hàng
+    res.status(200).json({ data: orderItems });
+  } catch (error) {
+    console.error('Fetch order items by order ID error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 const updateOrderItem = async (req, res) => {
   try {
     const updatedOrderItem = await OrderItem.findOneAndUpdate(
@@ -101,6 +145,7 @@ const deleteOrderItem = async (req, res) => {
 module.exports = {
   createOrderItem,
   getMyOrderItems,
+  getOrderItemsByOrderId,
   updateOrderItem,
   deleteOrderItem
 };
