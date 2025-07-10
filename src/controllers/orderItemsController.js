@@ -141,11 +141,177 @@ const deleteOrderItem = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+// orderItemsController.js
+const searchOrderItems = async (req, res) => {
+  try {
+    const { query, page = 1, limit = 10 } = req.query;
+
+    if (!query) {
+      return res.status(400).json({ message: 'Search query is required' });
+    }
+
+    // Tìm các order của user
+    const orders = await Order.find({ user_id: req.user.userId }).select('_id').lean();
+    const orderIds = orders.map(order => order._id);
+
+    // Sử dụng aggregation để join và tìm kiếm
+    const orderItems = await OrderItem.aggregate([
+      // Lọc các OrderItem theo orderIds
+      { $match: { order_id: { $in: orderIds } } },
+      // Join với collection Pet
+      {
+        $lookup: {
+          from: 'pets', // Tên collection của Pet (kiểm tra tên chính xác trong MongoDB)
+          localField: 'pet_id',
+          foreignField: '_id',
+          as: 'pet_data'
+        }
+      },
+      // Join với collection Product
+      {
+        $lookup: {
+          from: 'products', // Tên collection của Product
+          localField: 'product_id',
+          foreignField: '_id',
+          as: 'product_data'
+        }
+      },
+      // Join với collection Order
+      {
+        $lookup: {
+          from: 'orders',
+          localField: 'order_id',
+          foreignField: '_id',
+          as: 'order_data'
+        }
+      },
+      // Join với collection Address
+      {
+        $lookup: {
+          from: 'addresses',
+          localField: 'addresses_id',
+          foreignField: '_id',
+          as: 'address_data'
+        }
+      },
+      // Unwind để xử lý mảng (vì $lookup trả về mảng)
+      { $unwind: { path: '$pet_data', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$product_data', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$order_data', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$address_data', preserveNullAndEmptyArrays: true } },
+      // Tìm kiếm theo tên pet, tên product hoặc _id
+      {
+        $match: {
+          $or: [
+            { 'pet_data.name': { $regex: query, $options: 'i' } },
+            { 'product_data.name': { $regex: query, $options: 'i' } },
+            { _id: { $regex: query, $options: 'i' } }
+          ]
+        }
+      },
+      // Phân trang
+      { $skip: (page - 1) * limit },
+      { $limit: parseInt(limit) },
+      // Project để định dạng output
+      {
+        $project: {
+          _id: 1,
+          quantity: 1,
+          unit_price: 1,
+          pet_id: { $cond: [{ $ifNull: ['$pet_data', false] }, { _id: '$pet_data._id', name: '$pet_data.name', price: '$pet_data.price' }, null] },
+          product_id: { $cond: [{ $ifNull: ['$product_data', false] }, { _id: '$product_data._id', name: '$product_data.name', price: '$product_data.price' }, null] },
+          order_id: { total_amount: '$order_data.total_amount', status: '$order_data.status' },
+          addresses_id: {
+            name: '$address_data.name',
+            phone: '$address_data.phone',
+            note: '$address_data.note',
+            province: '$address_data.province',
+            district: '$address_data.district',
+            ward: '$address_data.ward',
+            postal_code: '$address_data.postal_code',
+            country: '$address_data.country'
+          },
+          created_at: 1,
+          updated_at: 1
+        }
+      }
+    ]);
+
+    // Populate images
+    for (let item of orderItems) {
+      if (item.pet_id) {
+        const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
+        item.pet_id.images = petImages;
+      }
+      if (item.product_id) {
+        const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
+        item.product_id.images = productImages;
+      }
+    }
+
+    // Đếm tổng số kết quả
+    const totalCount = await OrderItem.aggregate([
+      { $match: { order_id: { $in: orderIds } } },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'pet_id',
+          foreignField: '_id',
+          as: 'pet_data'
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'product_id',
+          foreignField: '_id',
+          as: 'product_data'
+        }
+      },
+      { $unwind: { path: '$pet_data', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$product_data', preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          $or: [
+            { 'pet_data.name': { $regex: query, $options: 'i' } },
+            { 'product_data.name': { $regex: query, $options: 'i' } },
+            { _id: { $regex: query, $options: 'i' } }
+          ]
+        }
+      },
+      { $count: 'total' }
+    ]);
+
+    const total = totalCount.length > 0 ? totalCount[0].total : 0;
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Order items retrieved successfully',
+      data: {
+        items: orderItems,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / limit),
+          totalCount: total,
+          hasNextPage: page * limit < total,
+          hasPrevPage: page > 1,
+          limit: parseInt(limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Search order items error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 
 module.exports = {
   createOrderItem,
   getMyOrderItems,
   getOrderItemsByOrderId,
   updateOrderItem,
-  deleteOrderItem
+  deleteOrderItem,
+  searchOrderItems
 };
