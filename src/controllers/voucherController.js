@@ -154,7 +154,7 @@ class VoucherController extends BaseCrudController {
   async saveVoucher(req, res) {
     try {
       const { voucherId } = req.params;
-      const userId = req.user?.id;
+      const userId =req.user?.userId;
 
       if (!userId) {
         return res.status(401).json({
