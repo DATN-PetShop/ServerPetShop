@@ -31,6 +31,7 @@ const auth = async (req, res, next) => {
     }
 
     req.user = decoded;
+    req.user.id = decoded.userId;
     req.userData = user;
     
     next();

@@ -1,24 +1,15 @@
 const express = require('express');
-const router = express.Router({ mergeParams: true });
-
-const auth = require('../middleware/auth'); // Giả định middleware xác thực
+const router = express.Router();
+const auth = require('../middleware/auth');
+const requireRoles = require('../middleware/requireRole');
 const {
   createReview,
-  getAllReviews, // Tên đã được cập nhật
-  updateReview,
-  deleteReview,
-} = require('../controllers/reviewsController');
+  getAllReviews,
+  deleteReview
+} = require('../controllers/reviewController');
 
 router.get('/', getAllReviews);
-
-
-router.use(auth);
-
-router.post('/', createReview);
-
-
-router.route('/:id')
-  .put(updateReview)
-  .delete(deleteReview);
+router.post('/', auth, createReview);
+router.delete('/:id', auth, requireRoles(['Admin']), deleteReview);
 
 module.exports = router;
