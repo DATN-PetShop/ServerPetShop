@@ -33,7 +33,7 @@ class VoucherController extends BaseCrudController {
         user_id: body.user_id || req.user.id,
         created_by: req.user.id,
       };
-
+ 
       const voucher = new this.model(voucherData);
       await voucher.save();
 
