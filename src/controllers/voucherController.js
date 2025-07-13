@@ -1,4 +1,3 @@
-// src/controllers/voucherController.js
 const Voucher = require('../models/Voucher');
 const BaseCrudController = require('./baseCrudController');
 
@@ -8,7 +7,7 @@ class VoucherController extends BaseCrudController {
   }
 
   getRequiredFields() {
-    return ['discount_type', 'min_purchase_amount', 'expiry_date', 'category_id']; // Loại bỏ user_id
+    return ['discount_type', 'min_purchase_amount', 'expiry_date', 'category_id'];
   }
 
   getEntityName() {
@@ -29,10 +28,9 @@ class VoucherController extends BaseCrudController {
         });
       }
 
-      // Gán user_id và created_by từ req.user.id (từ token)
       const voucherData = {
         ...body,
-        user_id: body.user_id || req.user.id, // Sử dụng req.user.id nếu user_id không có trong body
+        user_id: body.user_id || req.user.id,
         created_by: req.user.id,
       };
 
@@ -52,6 +50,72 @@ class VoucherController extends BaseCrudController {
         statusCode: 400,
         message: error.message || 'Lỗi khi tạo voucher',
         data: null
+      });
+    }
+  }
+
+  async update(req, res) {
+    try {
+      const { id } = req.params;
+      const body = req.body;
+      const userId = req.user?.userId;
+
+      // Kiểm tra voucher tồn tại
+      const voucher = await this.model.findOne({ 
+        _id: id, 
+        user_id: userId 
+      });
+      
+      if (!voucher) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Không tìm thấy voucher',
+          data: null
+        });
+      }
+
+      // Kiểm tra các trường bắt buộc
+      const requiredFields = this.getRequiredFields();
+      const missingFields = requiredFields.filter(field => body[field] === undefined);
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: `${missingFields.join(', ')} là bắt buộc`,
+          data: null
+        });
+      }
+
+      // Cập nhật dữ liệu voucher
+      const updateData = {
+        ...body,
+        last_modified_by: userId,
+        updated_at: Date.now()
+      };
+
+      // Cập nhật và trả về voucher đã sửa
+      const updatedVoucher = await this.model.findOneAndUpdate(
+        { _id: id, user_id: userId },
+        { $set: updateData },
+        { new: true }
+      ).populate('user_id', 'username email')
+       .populate('category_id', 'name description');
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Cập nhật voucher thành công',
+        data: updatedVoucher
+      });
+    } catch (error) {
+      console.error('Lỗi khi cập nhật voucher:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi máy chủ nội bộ',
+        data: null,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
@@ -154,7 +218,7 @@ class VoucherController extends BaseCrudController {
   async saveVoucher(req, res) {
     try {
       const { voucherId } = req.params;
-      const userId =req.user?.userId;
+      const userId = req.user?.userId;
 
       if (!userId) {
         return res.status(401).json({

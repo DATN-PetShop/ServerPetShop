@@ -17,7 +17,7 @@ router.get('/', getAllVouchers); // Tất cả vai trò có thể xem
 router.get('/admin', auth, requireRoles(['Admin']), getAllVouchers); 
 
 router.post('/', auth, requireRoles(['Admin', 'Staff']), createVoucher);
-router.put('/:id', auth, requireRoles(['Admin', 'Staff']), updateVoucher);
+router.put('/:id', auth, updateVoucher);
 router.delete('/:id', auth, requireRoles(['Admin']), deleteVoucher);
 
 router.get('/search', searchVouchers);
