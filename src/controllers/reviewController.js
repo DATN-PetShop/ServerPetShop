@@ -76,6 +76,7 @@ class ReviewController extends BaseCrudController {
       const reviews = await this.model.find()
         .populate('pet_id', 'name breed')
         .populate('user_id', 'username email')
+        .populate('product_id', 'name price')
         .lean();
 
       res.status(200).json({

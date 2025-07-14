@@ -30,6 +30,12 @@ const reviewSchema = new mongoose.Schema({
     ref: 'User', 
     required: true, 
     description: 'ID của người dùng tạo đánh giá'
+  },
+  product_id: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Product', 
+    required: false, 
+    description: 'ID của sản phẩm liên kết với đánh giá (tùy chọn)'
   }
 });
 
