@@ -45,7 +45,7 @@ const getOrderById = async (req, res) => {
       _id: req.params.id, 
       user_id: req.user.userId 
     })
-      .populate('user_id', 'name email ') // Populate user_id with name and email fields
+      .populate('user_id', 'username email ') // Populate user_id with name and email fields
       .lean();
 
     if (!order) {
