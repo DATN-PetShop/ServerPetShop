@@ -23,6 +23,7 @@ const chatRoutes = require('./src/routes/chatRoutes');
 const vnpayRoutes = require('./src/routes/vnpayRoutes');
 const orderItemRoutes = require('./src/routes/orderItemRoutes');
 const favouriteRoutes = require('./src/routes/favouriteRoutes');
+const reviewRoutes = require('./src/routes/reviewsRouter');
 
 const app = express();
 const server = http.createServer(app);
@@ -65,7 +66,7 @@ app.use('/api/notification', notificationRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/chat', chatRoutes);
-
+app.use('/api/reviews', reviewRoutes);
 app.use('/api/order_items', orderItemRoutes);
 app.use('/', vnpayRoutes);
 app.use('/api/favourites', favouriteRoutes);
