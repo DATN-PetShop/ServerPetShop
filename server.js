@@ -24,7 +24,8 @@ const vnpayRoutes = require('./src/routes/vnpayRoutes');
 const orderItemRoutes = require('./src/routes/orderItemRoutes');
 const favouriteRoutes = require('./src/routes/favouriteRoutes');
 const reviewRoutes = require('./src/routes/reviewsRouter');
-
+const appointmentRoutes = require('./src/routes/appointmentRoutes');
+const careServiceRoutes = require('./src/routes/careServiceRoutes');
 const app = express();
 const server = http.createServer(app);
 
@@ -73,7 +74,8 @@ app.use('/api/favourites', favouriteRoutes);
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
 });
-
+app.use('/api/appointments', appointmentRoutes);//Quản lý lịch hẹn
+app.use('/api/care-services', careServiceRoutes); //Quản lý dịch vụ
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
