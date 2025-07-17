@@ -2,57 +2,121 @@
 const Appointment = require('../models/Appointment');
 const CareService = require('../models/CareService');
 const Pet = require('../models/Pet');
+const Order = require('../models/Order');
+const OrderItem = require('../models/OrderItem');
 
 class AppointmentController {
   // Tạo lịch hẹn mới
   async createAppointment(req, res) {
     try {
-      const user_id = req.user.userId;
-      const { pet_id, service_id, appointment_date, appointment_time, notes } = req.body;
+      const user_id = req.user?.userId;
+      if (!user_id) {
+        return res.status(401).json({
+          success: false,
+          message: 'Không xác thực được người dùng'
+        });
+      }
+      const { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount } = req.body;
+
+      // Log request body và user_id
+      console.log('createAppointment - Request body:', { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount });
+      console.log('createAppointment - Authenticated user_id:', user_id);
 
       // Validation
-      if (!pet_id || !service_id || !appointment_date || !appointment_time) {
+    //   if (!pet_id || !service_id || !appointment_date || !appointment_time || !order_id || !total_amount) {
+    //     console.log('createAppointment - Validation failed: Missing required fields');
+    //     return res.status(400).json({
+    //       success: false,
+    //       message: 'Thiếu thông tin bắt buộc: pet_id, service_id, appointment_date, appointment_time, order_id, total_amount'
+    //     });
+    //   }
+
+      // Kiểm tra định dạng appointment_time
+      if (!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(appointment_time)) {
+        console.log('createAppointment - Invalid time format:', appointment_time);
         return res.status(400).json({
           success: false,
-          message: 'Thiếu thông tin bắt buộc'
+          message: 'Thời gian phải theo định dạng HH:MM'
         });
       }
 
-      // Kiểm tra pet thuộc về user
-      const pet = await Pet.findOne({ _id: pet_id, user_id });
+      // Kiểm tra đơn hàng thuộc về user
+      console.log('createAppointment - Checking order:', { order_id, user_id });
+      const order = await Order.findOne({ _id: order_id, user_id });
+      if (!order) {
+        console.log('createAppointment - Order not found or does not belong to user:', { order_id, user_id });
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy đơn hàng hoặc đơn hàng không thuộc về bạn'
+        });
+      }
+      console.log('createAppointment - Order found:', order);
+
+      // Kiểm tra pet_id trong OrderItem của đơn hàng
+      console.log('createAppointment - Checking order item:', { order_id, pet_id });
+      const orderItem = await OrderItem.findOne({ order_id, pet_id });
+      if (!orderItem) {
+        console.log('createAppointment - OrderItem not found:', { order_id, pet_id });
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy thú cưng trong đơn hàng đã mua'
+        });
+      }
+      console.log('createAppointment - OrderItem found:', orderItem);
+
+      // Kiểm tra pet tồn tại
+      console.log('createAppointment - Checking pet:', pet_id);
+      const pet = await Pet.findById(pet_id);
       if (!pet) {
+        console.log('createAppointment - Pet not found:', pet_id);
         return res.status(404).json({
           success: false,
           message: 'Không tìm thấy thú cưng'
         });
       }
+      console.log('createAppointment - Pet found:', pet);
 
       // Kiểm tra service tồn tại
+      console.log('createAppointment - Checking service:', service_id);
       const service = await CareService.findById(service_id);
       if (!service || !service.is_active) {
+        console.log('createAppointment - Service not found or inactive:', { service_id, is_active: service?.is_active });
         return res.status(404).json({
           success: false,
           message: 'Dịch vụ không tồn tại hoặc đã ngừng hoạt động'
         });
       }
+      console.log('createAppointment - Service found:', service);
+
+      // Kiểm tra total_amount khớp với giá dịch vụ
+      if (total_amount !== service.price) {
+        console.log('createAppointment - Total amount mismatch:', { total_amount, service_price: service.price });
+        return res.status(400).json({
+          success: false,
+          message: 'Số tiền không khớp với giá dịch vụ'
+        });
+      }
 
       // Kiểm tra thời gian đặt lịch hợp lệ (không được trong quá khứ)
-      const appointmentDateTime = new Date(`${appointment_date}T${appointment_time}`);
+      const appointmentDateTime = new Date(`${appointment_date}T${appointment_time}:00`);
+      console.log('createAppointment - Checking appointment time:', { appointmentDateTime, now: new Date() });
       if (appointmentDateTime <= new Date()) {
+        console.log('createAppointment - Appointment time is in the past');
         return res.status(400).json({
           success: false,
           message: 'Thời gian đặt lịch phải trong tương lai'
         });
       }
 
-      // Kiểm tra xem có lịch trùng không (tạm thời bỏ qua staff_id)
+      // Kiểm tra xem có lịch trùng không
+      console.log('createAppointment - Checking for conflicting appointments:', { appointment_date, appointment_time });
       const existingAppointment = await Appointment.findOne({
         appointment_date: new Date(appointment_date),
         appointment_time,
         status: { $nin: ['cancelled'] }
       });
-
       if (existingAppointment) {
+        console.log('createAppointment - Conflicting appointment found:', existingAppointment);
         return res.status(409).json({
           success: false,
           message: 'Khung giờ này đã được đặt'
@@ -60,10 +124,12 @@ class AppointmentController {
       }
 
       // Tạo lịch hẹn
+      console.log('createAppointment - Creating new appointment');
       const appointment = new Appointment({
         user_id,
         pet_id,
         service_id,
+        order_id, // Thêm dòng này
         appointment_date: new Date(appointment_date),
         appointment_time,
         notes,
@@ -71,12 +137,14 @@ class AppointmentController {
       });
 
       await appointment.save();
+      console.log('createAppointment - Appointment saved:', appointment._id);
 
       // Populate thông tin để trả về
       const populatedAppointment = await Appointment.findById(appointment._id)
         .populate('pet_id', 'name breed_id')
         .populate('service_id', 'name price duration')
         .populate('user_id', 'username email');
+      console.log('createAppointment - Populated appointment:', populatedAppointment);
 
       res.status(201).json({
         success: true,
@@ -84,7 +152,7 @@ class AppointmentController {
         data: populatedAppointment
       });
     } catch (error) {
-      console.error('Create appointment error:', error);
+      console.error('createAppointment - Error:', error.message, error.stack);
       res.status(500).json({
         success: false,
         message: 'Lỗi server',
@@ -96,7 +164,13 @@ class AppointmentController {
   // Lấy danh sách lịch hẹn của user
   async getUserAppointments(req, res) {
     try {
-      const user_id = req.user.userId;
+      const user_id = req.user?.userId;
+      if (!user_id) {
+        return res.status(401).json({
+          success: false,
+          message: 'Không xác thực được người dùng'
+        });
+      }
       const { status, page = 1, limit = 10 } = req.query;
 
       // Tạo filter
@@ -145,7 +219,13 @@ class AppointmentController {
   // Lấy chi tiết lịch hẹn
   async getAppointmentById(req, res) {
     try {
-      const user_id = req.user.userId;
+      const user_id = req.user?.userId;
+      if (!user_id) {
+        return res.status(401).json({
+          success: false,
+          message: 'Không xác thực được người dùng'
+        });
+      }
       const { id } = req.params;
 
       const appointment = await Appointment.findOne({ _id: id, user_id })
@@ -178,7 +258,13 @@ class AppointmentController {
   // Cập nhật lịch hẹn (chỉ khi chưa confirmed)
   async updateAppointment(req, res) {
     try {
-      const user_id = req.user.userId;
+      const user_id = req.user?.userId;
+      if (!user_id) {
+        return res.status(401).json({
+          success: false,
+          message: 'Không xác thực được người dùng'
+        });
+      }
       const { id } = req.params;
       const { appointment_date, appointment_time, notes } = req.body;
 
@@ -233,7 +319,13 @@ class AppointmentController {
   // Hủy lịch hẹn
   async cancelAppointment(req, res) {
     try {
-      const user_id = req.user.userId;
+      const user_id = req.user?.userId;
+      if (!user_id) {
+        return res.status(401).json({
+          success: false,
+          message: 'Không xác thực được người dùng'
+        });
+      }
       const { id } = req.params;
 
       const appointment = await Appointment.findOne({ _id: id, user_id });
