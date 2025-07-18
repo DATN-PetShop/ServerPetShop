@@ -1,11 +1,17 @@
 const mongoose = require('mongoose');
 
 const favouriteSchema = new mongoose.Schema({
+  id: { type: mongoose.Schema.Types.ObjectId, auto: true },
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-  created_at: { type: Date, default: Date.now }
+  pet_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Pet' },
+  product_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+  created_at: { type: Date, default: Date.now },
+  updated_at: { type: Date, default: Date.now }
 });
 
-favouriteSchema.index({ user_id: 1, product_id: 1 }, { unique: true }); // không cho trùng
+favouriteSchema.pre('save', function(next) {
+  this.updated_at = Date.now();
+  next();
+});
 
 module.exports = mongoose.model('Favourite', favouriteSchema);
