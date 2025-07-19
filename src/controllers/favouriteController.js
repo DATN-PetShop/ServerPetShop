@@ -1,198 +1,180 @@
+// src/controllers/favouriteController.js - CẬP NHẬT
 const Favourite = require('../models/Favourite');
-const BaseCrudController = require('./baseCrudController');
 
-class FavouriteController extends BaseCrudController {
-  constructor() {
-    super(Favourite);
-  }
 
-  getRequiredFields() {
-    return ['user_id', 'pet_id', 'product_id'];
-  }
-
-  getEntityName() {
-    return 'Favourite';
-  }
-
-  async create(req, res) {
+class FavouriteController {
+  // Thêm yêu thích (hỗ trợ cả product và pet)
+  async add(req, res) {
     try {
-      const { user_id, pet_id, product_id } = req.body;
+      const user_id = req.user.userId;
+      const { product_id, pet_id } = req.body;
 
-      const existingFavourite = await this.model.findOne({
-        user_id,
-        $or: [{ pet_id }, { product_id }]
-      });
-
-      if (existingFavourite) {
-        return res.status(400).json({
-          success: false,
-          statusCode: 400,
-          message: 'Favourite already exists for this user and pet/product',
-          data: null
+      // Validation
+      if (!product_id && !pet_id) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Cần cung cấp product_id hoặc pet_id' 
         });
       }
 
-      const favourite = new this.model({
-        user_id,
-        pet_id,
-        product_id,
-        created_at: new Date()
-      });
+      if (product_id && pet_id) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Chỉ có thể thêm một loại (product hoặc pet)' 
+        });
+      }
 
-      const savedFavourite = await favourite.save();
-      res.status(201).json({
-        success: true,
-        statusCode: 201,
-        message: 'Favourite created successfully',
-        data: savedFavourite
+      // Tạo favourite object
+      const favouriteData = { user_id };
+      if (product_id) favouriteData.product_id = product_id;
+      if (pet_id) favouriteData.pet_id = pet_id;
+
+      const favourite = new Favourite(favouriteData);
+      await favourite.save();
+
+      res.status(201).json({ 
+        success: true, 
+        message: 'Đã thêm vào yêu thích',
+        data: favourite
       });
-    } catch (error) {
-      console.error('Create favourite error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
+    } catch (err) {
+      if (err.code === 11000) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Đã có trong danh sách yêu thích' 
+        });
+      }
+      console.error('Add favourite error:', err);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Lỗi server', 
+        error: err.message 
       });
     }
   }
+
+  // Xóa yêu thích
+  async remove(req, res) {
+    try {
+      const user_id = req.user.userId;
+      const { product_id, pet_id } = req.body;
+
+      // Tạo query filter
+      const filter = { user_id };
+      if (product_id) filter.product_id = product_id;
+      if (pet_id) filter.pet_id = pet_id;
+
+      const deleted = await Favourite.findOneAndDelete(filter);
+      if (!deleted) {
+        return res.status(404).json({ 
+          success: false, 
+          message: 'Không tìm thấy trong danh sách yêu thích' 
+        });
+      }
+
+      res.status(200).json({ 
+        success: true, 
+        message: 'Đã xóa khỏi yêu thích' 
+      });
+    } catch (err) {
+      console.error('Remove favourite error:', err);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Lỗi server', 
+        error: err.message 
+      });
+    }
+  }
+
+  // Lấy danh sách yêu thích
 
   async getAll(req, res) {
     try {
-      const favourites = await this.model.find()
-        .populate('user_id', 'username email')
-        .populate('pet_id', 'name price')
-        .populate('product_id', 'name price')
-        .lean();
+      const user_id = req.user.userId;
+      console.log('🔍 Getting favourites for user:', user_id);
+      
+      const favourites = await Favourite.find({ user_id })
+        .populate({
+          path: 'product_id',
+          select: 'name price description',
+          // ✅ KHÔNG POPULATE TRỰC TIẾP VÌ RELATIONSHIP PHỨC TẠP
+        })
+        .populate({
+          path: 'pet_id', 
+          select: 'name price description breed_id age gender weight',
+          populate: {
+            path: 'breed_id',
+            select: 'name'
+          }
+        })
+        .sort({ created_at: -1 })
+        .lean(); // ✅ SỬ DỤNG LEAN() ĐỂ MODIFY DỄ DÀNG
 
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
+      // ✅ MANUALLY ADD IMAGES
+      for (let favourite of favourites) {
+        if (favourite.product_id) {
+          const ProductImage = require('../models/ProductImage');
+          favourite.product_id.images = await ProductImage.find({ 
+            product_id: favourite.product_id._id 
+          }).select('url is_primary').lean();
+        }
+        
+        if (favourite.pet_id) {
+          const ImagePet = require('../models/ImagePet');
+          favourite.pet_id.images = await ImagePet.find({ 
+            pet_id: favourite.pet_id._id 
+          }).select('url is_primary').lean();
+        }
+      }
+
+      res.status(200).json({ 
+        success: true, 
+        data: favourites,
         message: 'Favourites retrieved successfully',
-        data: favourites
+        statusCode: 200
       });
-    } catch (error) {
-      console.error('Get all favourites error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
+    } catch (err) {
+      console.error('Get favourites error:', err);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Lỗi server', 
+        error: err.message 
       });
     }
   }
 
-  async getById(req, res) {
+  // Kiểm tra item có trong yêu thích hay không
+  async checkFavourite(req, res) {
     try {
-      const { id } = req.params;
-      const favourite = await this.model.findById(id)
-        .populate('user_id', 'username email')
-        .populate('pet_id', 'name price')
-        .populate('product_id', 'name price')
-        .lean();
+      const user_id = req.user.userId;
+      const { product_id, pet_id } = req.query;
 
-      if (!favourite) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Favourite not found',
-          data: null
-        });
-      }
+      const filter = { user_id };
+      if (product_id) filter.product_id = product_id;
+      if (pet_id) filter.pet_id = pet_id;
 
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Favourite retrieved successfully',
+      const favourite = await Favourite.findOne(filter);
+
+      res.status(200).json({ 
+        success: true, 
+        isFavorite: !!favourite,
         data: favourite
       });
-    } catch (error) {
-      console.error('Get favourite by ID error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
-    }
-  }
-
-  async update(req, res) {
-    try {
-      const { id } = req.params;
-      const { user_id, pet_id, product_id } = req.body;
-
-      const favourite = await this.model.findById(id);
-      if (!favourite) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Favourite not found',
-          data: null
-        });
-      }
-
-      if (user_id) favourite.user_id = user_id;
-      if (pet_id) favourite.pet_id = pet_id;
-      if (product_id) favourite.product_id = product_id;
-      favourite.updated_at = new Date();
-
-      const updatedFavourite = await favourite.save();
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Favourite updated successfully',
-        data: updatedFavourite
-      });
-    } catch (error) {
-      console.error('Update favourite error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
-    }
-  }
-
-  async delete(req, res) {
-    try {
-      const { id } = req.params;
-      const favourite = await this.model.findByIdAndDelete(id);
-
-      if (!favourite) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Favourite not found',
-          data: null
-        });
-      }
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Favourite deleted successfully',
-        data: null
-      });
-    } catch (error) {
-      console.error('Delete favourite error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
+    } catch (err) {
+      console.error('Check favourite error:', err);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Lỗi server', 
+        error: err.message 
       });
     }
   }
 }
 
-const favouriteController = new FavouriteController();
-
+const controller = new FavouriteController();
 module.exports = {
-  createFavourite: favouriteController.create.bind(favouriteController),
-  getAllFavourites: favouriteController.getAll.bind(favouriteController),
-  getFavouriteById: favouriteController.getById.bind(favouriteController),
-  updateFavourite: favouriteController.update.bind(favouriteController),
-  deleteFavourite: favouriteController.delete.bind(favouriteController)
+  addFavourite: controller.add.bind(controller),
+  removeFavourite: controller.remove.bind(controller),
+  getFavourites: controller.getAll.bind(controller),
+  checkFavourite: controller.checkFavourite.bind(controller),
 };

@@ -17,6 +17,11 @@ const appointmentSchema = new mongoose.Schema({
     ref: 'CareService',
     required: true
   },
+  order_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Order',
+    required: true // Bắt buộc vì lịch hẹn phải liên kết với đơn hàng
+  },
   appointment_date: {
     type: Date,
     required: true
