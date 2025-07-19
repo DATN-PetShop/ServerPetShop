@@ -1,22 +1,18 @@
+// src/routes/favouriteRoutes.js - CẬP NHẬT
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
-const requireRoles = require('../middleware/requireRole');
 const {
-  createFavourite,
-  getAllFavourites,
-  getFavouriteById,
-  updateFavourite,
-  deleteFavourite
+  addFavourite,
+  removeFavourite,
+  getFavourites,
+  checkFavourite,
 } = require('../controllers/favouriteController');
 
-// Public routes
-router.get('/', getAllFavourites);
-router.get('/:id', getFavouriteById);
-
-// Protected routes
-router.post('/', auth, createFavourite);
-router.put('/:id', auth, updateFavourite);
-router.delete('/:id', auth, deleteFavourite);
+// Routes
+router.post('/', auth, addFavourite);
+router.delete('/', auth, removeFavourite);
+router.get('/', auth, getFavourites);
+router.get('/check', auth, checkFavourite); // Route mới để check
 
 module.exports = router;
