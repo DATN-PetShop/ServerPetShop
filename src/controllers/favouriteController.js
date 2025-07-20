@@ -1,8 +1,8 @@
-// src/controllers/favouriteController.js - FIXED - Giữ nguyên routes cũ
+// src/controllers/favouriteController.js - ENHANCED ERROR HANDLING
 const Favourite = require('../models/Favourite');
 
 class FavouriteController {
-  // ✅ Thêm yêu thích (hỗ trợ cả product và pet) - FIXED DUPLICATE
+  // ✅ ENHANCED ADD METHOD - Better duplicate handling
   async add(req, res) {
     try {
       const user_id = req.user.userId;
@@ -30,13 +30,18 @@ class FavouriteController {
       
       const existingFavourite = await Favourite.findOne(filter);
       if (existingFavourite) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Đã có trong danh sách yêu thích' 
+        console.log('📝 Duplicate favourite detected, returning existing');
+        
+        // ✅ RETURN SUCCESS WITH EXISTING DATA thay vì error
+        return res.status(200).json({ 
+          success: true, 
+          message: 'Đã có trong danh sách yêu thích',
+          data: existingFavourite,
+          isExisting: true // ✅ Flag để frontend biết đây là existing item
         });
       }
 
-      // Tạo favourite object
+      // Tạo favourite object mới
       const favouriteData = { user_id };
       if (product_id) favouriteData.product_id = product_id;
       if (pet_id) favouriteData.pet_id = pet_id;
@@ -47,16 +52,38 @@ class FavouriteController {
       res.status(201).json({ 
         success: true, 
         message: 'Đã thêm vào yêu thích',
-        data: favourite
+        data: favourite,
+        isExisting: false
       });
     } catch (err) {
-      // ✅ Handle MongoDB duplicate key error (backup protection)
+      // ✅ BACKUP: Handle MongoDB duplicate key error
       if (err.code === 11000) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Đã có trong danh sách yêu thích' 
+        console.log('📝 MongoDB duplicate key error, treating as success');
+        
+        // Tìm existing record để return
+        const filter = { user_id: req.user.userId };
+        if (req.body.product_id) filter.product_id = req.body.product_id;
+        if (req.body.pet_id) filter.pet_id = req.body.pet_id;
+        
+        try {
+          const existingFavourite = await Favourite.findOne(filter);
+          return res.status(200).json({ 
+            success: true, 
+            message: 'Đã có trong danh sách yêu thích',
+            data: existingFavourite,
+            isExisting: true
+          });
+        } catch (findErr) {
+          console.error('Error finding existing favourite:', findErr);
+        }
+        
+        return res.status(200).json({ 
+          success: true, 
+          message: 'Đã có trong danh sách yêu thích',
+          isExisting: true
         });
       }
+      
       console.error('Add favourite error:', err);
       res.status(500).json({ 
         success: false, 
@@ -66,7 +93,7 @@ class FavouriteController {
     }
   }
 
-  // Xóa yêu thích - GIỮ NGUYÊN
+  // ✅ ENHANCED REMOVE METHOD
   async remove(req, res) {
     try {
       const user_id = req.user.userId;
@@ -79,15 +106,19 @@ class FavouriteController {
 
       const deleted = await Favourite.findOneAndDelete(filter);
       if (!deleted) {
-        return res.status(404).json({ 
-          success: false, 
-          message: 'Không tìm thấy trong danh sách yêu thích' 
+        // ✅ RETURN SUCCESS thay vì 404 - item đã được remove rồi
+        console.log('📝 Item not in favourites, treating as success');
+        return res.status(200).json({ 
+          success: true, 
+          message: 'Đã xóa khỏi yêu thích',
+          wasExisting: false
         });
       }
 
       res.status(200).json({ 
         success: true, 
-        message: 'Đã xóa khỏi yêu thích' 
+        message: 'Đã xóa khỏi yêu thích',
+        wasExisting: true
       });
     } catch (err) {
       console.error('Remove favourite error:', err);
@@ -99,7 +130,7 @@ class FavouriteController {
     }
   }
 
-  // Lấy danh sách yêu thích - GIỮ NGUYÊN
+  // ✅ GETALL METHOD - Unchanged
   async getAll(req, res) {
     try {
       const user_id = req.user.userId;
@@ -109,7 +140,6 @@ class FavouriteController {
         .populate({
           path: 'product_id',
           select: 'name price description',
-          // ✅ KHÔNG POPULATE TRỰC TIẾP VÌ RELATIONSHIP PHỨC TẠP
         })
         .populate({
           path: 'pet_id', 
@@ -120,7 +150,7 @@ class FavouriteController {
           }
         })
         .sort({ created_at: -1 })
-        .lean(); // ✅ SỬ DỤNG LEAN() ĐỂ MODIFY DỄ DÀNG
+        .lean();
 
       // ✅ MANUALLY ADD IMAGES
       for (let favourite of favourites) {
@@ -155,11 +185,18 @@ class FavouriteController {
     }
   }
 
-  // Kiểm tra item có trong yêu thích hay không - GIỮ NGUYÊN
+  // ✅ CHECK FAVOURITE METHOD - Enhanced
   async checkFavourite(req, res) {
     try {
       const user_id = req.user.userId;
       const { product_id, pet_id } = req.query;
+
+      if (!product_id && !pet_id) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Cần cung cấp product_id hoặc pet_id' 
+        });
+      }
 
       const filter = { user_id };
       if (product_id) filter.product_id = product_id;
@@ -169,8 +206,11 @@ class FavouriteController {
 
       res.status(200).json({ 
         success: true, 
-        isFavorite: !!favourite,
-        data: favourite
+        data: { 
+          isFavorite: !!favourite,
+          favourite: favourite || null
+        },
+        message: 'Favourite status checked successfully'
       });
     } catch (err) {
       console.error('Check favourite error:', err);
