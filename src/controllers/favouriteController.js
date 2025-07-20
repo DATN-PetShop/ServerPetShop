@@ -1,9 +1,8 @@
-// src/controllers/favouriteController.js - CẬP NHẬT
+// src/controllers/favouriteController.js - FIXED - Giữ nguyên routes cũ
 const Favourite = require('../models/Favourite');
 
-
 class FavouriteController {
-  // Thêm yêu thích (hỗ trợ cả product và pet)
+  // ✅ Thêm yêu thích (hỗ trợ cả product và pet) - FIXED DUPLICATE
   async add(req, res) {
     try {
       const user_id = req.user.userId;
@@ -24,6 +23,19 @@ class FavouriteController {
         });
       }
 
+      // ✅ CHECK DUPLICATE TRƯỚC KHI SAVE
+      const filter = { user_id };
+      if (product_id) filter.product_id = product_id;
+      if (pet_id) filter.pet_id = pet_id;
+      
+      const existingFavourite = await Favourite.findOne(filter);
+      if (existingFavourite) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Đã có trong danh sách yêu thích' 
+        });
+      }
+
       // Tạo favourite object
       const favouriteData = { user_id };
       if (product_id) favouriteData.product_id = product_id;
@@ -38,6 +50,7 @@ class FavouriteController {
         data: favourite
       });
     } catch (err) {
+      // ✅ Handle MongoDB duplicate key error (backup protection)
       if (err.code === 11000) {
         return res.status(400).json({ 
           success: false, 
@@ -53,7 +66,7 @@ class FavouriteController {
     }
   }
 
-  // Xóa yêu thích
+  // Xóa yêu thích - GIỮ NGUYÊN
   async remove(req, res) {
     try {
       const user_id = req.user.userId;
@@ -86,8 +99,7 @@ class FavouriteController {
     }
   }
 
-  // Lấy danh sách yêu thích
-
+  // Lấy danh sách yêu thích - GIỮ NGUYÊN
   async getAll(req, res) {
     try {
       const user_id = req.user.userId;
@@ -143,7 +155,7 @@ class FavouriteController {
     }
   }
 
-  // Kiểm tra item có trong yêu thích hay không
+  // Kiểm tra item có trong yêu thích hay không - GIỮ NGUYÊN
   async checkFavourite(req, res) {
     try {
       const user_id = req.user.userId;
