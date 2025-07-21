@@ -24,7 +24,6 @@ class PetController extends BaseCrudController {
     try {
       const pets = await this.model.find()
         .populate('breed_id', 'name description')
-        // .populate('user_id', 'username email')
         .lean();
 
       // Populate images
@@ -176,7 +175,6 @@ async searchPets(req, res) {
 
     const pets = await this.model.find(filter)
       .populate('breed_id', 'name description')
-      .populate('user_id', 'username email')
       .sort(sort)
       .skip(skip)
       .limit(Number(limit))
