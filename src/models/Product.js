@@ -6,7 +6,6 @@ const productSchema = new mongoose.Schema({
   price: { type: Number, required: true },
   stock: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'inactive'], default: 'active' },
-  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   category_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now }

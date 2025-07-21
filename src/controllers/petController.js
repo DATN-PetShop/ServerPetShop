@@ -56,7 +56,6 @@ class PetController extends BaseCrudController {
     try {
       const pets = await this.model.find()
         .populate('breed_id', 'name description')
-        .populate('user_id', 'username email role')
         .lean();
 
       if (this.imageModel) {
@@ -2092,7 +2091,6 @@ async searchPets(req, res) {
             select: 'name description'
           }
         })
-        .populate('user_id', 'username email role')
         .lean();
 
       if (!pet) {
