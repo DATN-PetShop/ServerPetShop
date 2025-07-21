@@ -5,6 +5,32 @@ class NotificationController extends BaseCrudController {
   constructor() {
     super(Notification);
   }
+  
+  async create(req, res) {
+    try {
+      const newNotification = await this.model.create(req.body);
+      if (req.io) {
+        req.io.emit('new_notification', newNotification);
+      }
+
+      // 3. Trả về response thành công
+      res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: `${this.getEntityName()} created successfully`,
+        data: newNotification
+      });
+    } catch (error) {
+      console.error(`Create ${this.getEntityName()} error:`, error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+
 
   getRequiredFields() {
     return ['type', 'message', 'related_entity_id', 'related_entity_type', 'user_id'];
@@ -20,7 +46,6 @@ class NotificationController extends BaseCrudController {
       if (req.user && req.user.id) {
         notifications = await this.model.find({ user_id: req.user.id }).lean();
       } else {
-        // Nếu không có req.user.id, lấy tất cả thông báo (dành cho admin hoặc debug)
         notifications = await this.model.find().lean();
         console.log('No user ID found, fetching all notifications');
       }
@@ -53,6 +78,7 @@ class NotificationController extends BaseCrudController {
 }
 
 const notificationController = new NotificationController();
+
 
 module.exports = {
   createNotification: notificationController.create.bind(notificationController),
