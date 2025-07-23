@@ -30,7 +30,7 @@ const voucherSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ['active', 'inactive', 'pending', 'expired'], 
+    enum: ['active', 'inactive', 'pending', 'expired','used'], 
     default: 'active', 
     description: 'Trạng thái của voucher (active, inactive, pending, expired)'
   },

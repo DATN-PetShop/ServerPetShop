@@ -16,14 +16,16 @@ const breedRoutes = require('./src/routes/breedRoutes');
 const cartRoutes = require('./src/routes/cartRoutes');
 const paymentRoutes = require('./src/routes/paymentRoutes');
 const voucherRoutes = require('./src/routes/voucherRoutes');
-const addressRoutes = require('./src/routes/addressRoutes'); 
-const notificationRoutes = require('./src/routes/notificationRoutes'); 
+const addressRoutes = require('./src/routes/addressRoutes');
+const notificationRoutes = require('./src/routes/notificationRoutes');
 const bannerRoutes = require('./src/routes/bannerRoutes');
 const chatRoutes = require('./src/routes/chatRoutes');
 const vnpayRoutes = require('./src/routes/vnpayRoutes');
 const orderItemRoutes = require('./src/routes/orderItemRoutes');
 const favouriteRoutes = require('./src/routes/favouriteRoutes');
-
+const reviewRoutes = require('./src/routes/reviewsRouter');
+const appointmentRoutes = require('./src/routes/appointmentRoutes');
+const careServiceRoutes = require('./src/routes/careServiceRoutes');
 const app = express();
 const server = http.createServer(app);
 
@@ -37,6 +39,13 @@ const io = socketIo(server, {
 
 app.use(cors());
 app.use(express.json());
+
+
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
 
 console.log('MONGODB_URI:', process.env.MONGODB_URI);
 
@@ -54,25 +63,26 @@ mongoose
 
 app.use('/api/users', userRoutes);
 app.use('/api/vouchers', voucherRoutes);
-app.use('/api/pets', petRoutes); 
+app.use('/api/pets', petRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/breeds', breedRoutes);
-app.use('/api/cart', cartRoutes); 
+app.use('/api/cart', cartRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/notification', notificationRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/chat', chatRoutes);
-
+app.use('/api/reviews', reviewRoutes);
 app.use('/api/order_items', orderItemRoutes);
 app.use('/', vnpayRoutes);
 app.use('/api/favourites', favouriteRoutes);
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
 });
-
+app.use('/api/appointments', appointmentRoutes);//Quản lý lịch hẹn
+app.use('/api/care-services', careServiceRoutes); //Quản lý dịch vụ
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
@@ -87,7 +97,7 @@ function setupChatServices() {
     console.log('✅ Socket handler registered with Express app');
     const ChatRealtimeService = require('./src/services/chatRealtimeService');
     const chatRealtimeService = new ChatRealtimeService(socketHandler);
-    
+
     chatRealtimeService.startWatching();
 
     app.set('socketHandler', socketHandler);

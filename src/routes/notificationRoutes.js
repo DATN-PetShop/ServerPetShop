@@ -9,7 +9,7 @@ const {
   deleteNotification
 } = require('../controllers/notificationController');
 
-router.post('/', auth, createNotification);
+router.post('/', auth, requireRoles(['admin'], createNotification));
 router.get('/', auth, getAllNotifications);
 router.put('/:id', auth, updateNotification);
 router.delete('/:id', auth, deleteNotification);

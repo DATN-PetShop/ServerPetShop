@@ -10,7 +10,6 @@ const petSchema = new mongoose.Schema({
   status: { type: String, enum: ['available', 'sold', 'reserved'], default: 'available' },
   type: { type: String, required: true },
   breed_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Breed' },
-  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now }
 });

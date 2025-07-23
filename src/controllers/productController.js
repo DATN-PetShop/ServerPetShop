@@ -38,7 +38,6 @@ class ProductController extends BaseCrudController {
       const product = await this.model
         .findById(id)
         .populate('category_id', 'name description')
-        .populate('user_id', 'username email')
         .lean();
 
       if (!product) {
@@ -139,7 +138,6 @@ class ProductController extends BaseCrudController {
 
     const products = await this.model.find(filter)
       .populate('category_id', 'name description')
-      .populate('user_id', 'username email')
       .sort(sort)
       .skip(skip)
       .limit(Number(limit))
