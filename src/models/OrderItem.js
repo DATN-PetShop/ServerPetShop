@@ -25,6 +25,11 @@ const orderItemSchema = new mongoose.Schema({
     ref: 'Product',
     required: false // Bỏ required
   },
+  variant_id: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'PetVariant',
+  required: false
+},
   addresses_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Address',

@@ -2,7 +2,7 @@ const Pet = require('../models/Pet');
 const Image = require('../models/ImagePet');
 const BaseCrudController = require('./baseCrudController');
 const mongoose = require('mongoose');
-
+const PetVariant = require('../models/PetVariant');
 class PetController extends BaseCrudController {
   constructor() {
     super(Pet, Image);
@@ -2065,30 +2065,80 @@ async searchPets(req, res) {
     }
   }
 
-  // New method to get a single pet by ID
+  // // New method to get a single pet by ID
+  // async getPetById(req, res) {
+  //   try {
+  //     const { id } = req.params;
+
+  //     // Validate the ID
+  //     if (!mongoose.Types.ObjectId.isValid(id)) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         statusCode: 400,
+  //         message: 'Invalid pet ID format',
+  //         data: null
+  //       });
+  //     }
+
+  //     const pet = await this.model.findById(id)
+  //       .populate('breed_id', 'name description category_id')
+  //       .populate({
+  //         path: 'breed_id',
+  //         populate: {
+  //           path: 'category_id',
+  //           select: 'name description'
+  //         }
+  //       })
+  //       .lean();
+
+  //     if (!pet) {
+  //       return res.status(404).json({
+  //         success: false,
+  //         statusCode: 404,
+  //         message: 'Pet not found',
+  //         data: null
+  //       });
+  //     }
+
+  //     // Populate images
+  //     if (this.imageModel) {
+  //       const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+  //       pet.images = images;
+  //     }
+
+  //     res.status(200).json({
+  //       success: true,
+  //       statusCode: 200,
+  //       message: 'Pet retrieved successfully',
+  //       data: pet
+  //     });
+  //   } catch (error) {
+  //     console.error('Get pet by ID error:', error);
+  //     res.status(500).json({
+  //       success: false,
+  //       statusCode: 500,
+  //       message: 'Internal server error',
+  //       data: null
+  //     });
+  //   }
+  // }
+
+  // Cập nhật method getPetById để include variants
   async getPetById(req, res) {
     try {
       const { id } = req.params;
 
-      // Validate the ID
       if (!mongoose.Types.ObjectId.isValid(id)) {
         return res.status(400).json({
           success: false,
           statusCode: 400,
-          message: 'Invalid pet ID format',
+          message: 'Invalid pet ID',
           data: null
         });
       }
 
       const pet = await this.model.findById(id)
         .populate('breed_id', 'name description category_id')
-        .populate({
-          path: 'breed_id',
-          populate: {
-            path: 'category_id',
-            select: 'name description'
-          }
-        })
         .lean();
 
       if (!pet) {
@@ -2104,6 +2154,41 @@ async searchPets(req, res) {
       if (this.imageModel) {
         const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
         pet.images = images;
+      }
+
+      // 🆕 Populate variants
+      const variants = await PetVariant.find({ 
+        pet_id: pet._id, 
+        is_available: true 
+      }).lean();
+
+      // Tính final price cho mỗi variant
+      const variantsWithPrice = await Promise.all(
+        variants.map(async (variant) => {
+          const finalPrice = pet.price + variant.price_adjustment;
+          return {
+            ...variant,
+            final_price: finalPrice,
+            display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} years`
+          };
+        })
+      );
+
+      pet.variants = variantsWithPrice;
+
+      // 🆕 Thêm variant options cho frontend filter
+      if (variantsWithPrice.length > 0) {
+        const colors = [...new Set(variantsWithPrice.map(v => v.color))].sort();
+        const genders = [...new Set(variantsWithPrice.map(v => v.gender))].sort();
+        const ages = [...new Set(variantsWithPrice.map(v => v.age))].sort((a, b) => a - b);
+        const weights = [...new Set(variantsWithPrice.map(v => v.weight))].sort((a, b) => a - b);
+
+        pet.variant_options = {
+          colors,
+          genders,
+          age_range: { min: Math.min(...ages), max: Math.max(...ages) }, 
+          weight_range: { min: Math.min(...weights), max: Math.max(...weights) }
+        };
       }
 
       res.status(200).json({
@@ -2122,6 +2207,118 @@ async searchPets(req, res) {
       });
     }
   }
+
+  // 🆕 Method để tạo variants mặc định khi tạo pet mới
+  async createDefaultVariants(petId, petData) {
+    try {
+      // Nếu pet có thông tin variants trong request, tạo variants
+      const defaultVariant = new PetVariant({
+        pet_id: petId,
+        color: petData.color || 'Mixed',
+        weight: petData.weight || 5,
+        gender: petData.gender || 'Male',
+        age: petData.age || 1,
+        price_adjustment: 0,
+        stock_quantity: 1
+      });
+
+      await defaultVariant.save();
+      console.log(`✅ Created default variant for pet ${petId}`);
+    } catch (error) {
+      console.error('Create default variant error:', error);
+      // Không throw error để không ảnh hưởng đến việc tạo pet
+    }
+  }
+
+// Cập nhật method create để tự động tạo default variant
+async create(req, res) {
+  try {
+    const { name, price, type, breed_id, description, age, weight, gender, color } = req.body;
+    
+    // Validate required fields
+    const requiredFields = this.getRequiredFields();
+    for (const field of requiredFields) {
+      if (!req.body[field]) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: `${field} is required`,
+          data: null
+        });
+      }
+    }
+
+    // Tạo pet object
+    const petData = {
+      ...req.body,
+      user_id: req.user.userId
+    };
+
+    // Tạo pet
+    const newEntity = new this.model(petData);
+    const savedEntity = await newEntity.save();
+
+    // 🆕 Tự động tạo default variant
+    if (age || weight || gender || color) {
+      await this.createDefaultVariants(savedEntity._id, {
+        age: age || 1,
+        weight: weight || 5,
+        gender: gender || 'Male',
+        color: color || 'Mixed'
+      });
+    }
+
+    // Handle images nếu có
+    if (req.files && req.files.length > 0 && this.imageModel) {
+      const imagePromises = req.files.map(file => {
+        const imageData = {
+          url: file.path,
+          is_primary: false,
+          [this.getImageForeignKey()]: savedEntity._id
+        };
+        return new this.imageModel(imageData).save();
+      });
+
+      const savedImages = await Promise.all(imagePromises);
+      
+      if (savedImages.length > 0) {
+        savedImages[0].is_primary = true;
+        await savedImages[0].save();
+      }
+    }
+
+    // Populate và trả về kết quả
+    const populatedEntity = await this.model.findById(savedEntity._id)
+      .populate('breed_id', 'name description')
+      .populate('user_id', 'username email');
+
+    res.status(201).json({
+      success: true,
+      statusCode: 201,
+      message: `${this.getEntityName()} created successfully`,
+      data: populatedEntity
+    });
+
+  } catch (error) {
+    console.error(`Create ${this.getEntityName()} error:`, error);
+    
+    if (error.code === 11000) {
+      res.status(409).json({
+        success: false,
+        statusCode: 409,
+        message: `${this.getEntityName()} already exists`,
+        data: null
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+}
 }
 
 const petController = new PetController();
