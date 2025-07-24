@@ -4,8 +4,8 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
 // Generate JWT Token
-const generateToken = (userId) => {
-  return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
+const generateToken = (userId, role) => {
+  return jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
 // @desc    Register a new user
@@ -55,7 +55,7 @@ const registerUser = async (req, res) => {
     const savedUser = await user.save();
 
     // Generate token
-    const token = generateToken(savedUser._id);
+    const token = generateToken(savedUser._id, savedUser.role);
 
     // Return success response
     res.status(201).json({
@@ -119,7 +119,7 @@ const loginUser = async (req, res) => {
     }
 
     // Generate token
-    const token = generateToken(user._id);
+    const token = generateToken(user._id, user.role);
 
     res.status(200).json({
       success: true,
@@ -195,17 +195,6 @@ const adminRoute = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('-password_hash');
     
-    if (user.role !== 'Admin') {
-      return res.status(403).json({
-        success: false,
-        statusCode: 403,
-        message: 'Access denied. Admin role required.',
-        data: null
-      });
-    }
-
-    //const allUsers = await User.find().select('-password_hash').sort({ created_at: -1 });
-
     res.status(200).json({
       success: true,
       statusCode: 200,
@@ -241,15 +230,6 @@ const staffRoute = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('-password_hash');
     
-    if (!['Staff', 'Admin'].includes(user.role)) {
-      return res.status(403).json({
-        success: false,
-        statusCode: 403,
-        message: 'Access denied. Staff or Admin role required.',
-        data: null
-      });
-    }
-
     res.status(200).json({
       success: true,
       statusCode: 200,
