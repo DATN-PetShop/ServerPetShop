@@ -2290,7 +2290,7 @@ async create(req, res) {
     // Populate và trả về kết quả
     const populatedEntity = await this.model.findById(savedEntity._id)
       .populate('breed_id', 'name description')
-      .populate('user_id', 'username email');
+      // .populate('user_id', 'username email');
 
     res.status(201).json({
       success: true,
