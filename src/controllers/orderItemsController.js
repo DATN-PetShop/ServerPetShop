@@ -1,127 +1,276 @@
+// src/controllers/orderItemsController.js - CẬP NHẬT HỖ TRỢ VARIANT
 const OrderItem = require('../models/OrderItem');
 const Order = require('../models/Order');
+const Pet = require('../models/Pet');
+const Product = require('../models/Product');
+const PetVariant = require('../models/PetVariant');
 const ProductImage = require('../models/ProductImage');
 const Image = require('../models/ImagePet');
 
 const createOrderItem = async (req, res) => {
   try {
-    const { quantity, unit_price, pet_id, order_id, product_id, addresses_id } = req.body;
+    const { quantity, unit_price, pet_id, product_id, variant_id, order_id, addresses_id } = req.body;
+
+    console.log('🆕 Creating OrderItem with data:', req.body);
 
     // Kiểm tra các trường bắt buộc
     if (!quantity || !unit_price || !order_id || !addresses_id) {
-      return res.status(400).json({ message: 'Missing required fields: quantity, unit_price, order_id, or addresses_id' });
+      return res.status(400).json({ 
+        message: 'Missing required fields: quantity, unit_price, order_id, or addresses_id' 
+      });
     }
 
-    // Kiểm tra rằng chỉ một trong hai trường pet_id hoặc product_id được cung cấp
-    if (!pet_id && !product_id) {
-      return res.status(400).json({ message: 'At least one of pet_id or product_id must be provided' });
+    // 🔧 CẬP NHẬT VALIDATION cho variant_id
+    const itemIds = [pet_id, product_id, variant_id].filter(Boolean);
+    
+    if (itemIds.length === 0) {
+      return res.status(400).json({ 
+        message: 'At least one of pet_id, product_id, or variant_id must be provided' 
+      });
     }
-    if (pet_id && product_id) {
-      return res.status(400).json({ message: 'Only one of pet_id or product_id can be provided' });
+    
+    if (itemIds.length > 1) {
+      return res.status(400).json({ 
+        message: 'Only one of pet_id, product_id, or variant_id can be provided' 
+      });
     }
 
-    const orderItem = new OrderItem({
-      quantity,
-      unit_price,
-      pet_id: pet_id || null,
+    // 🆕 VERIFY item tồn tại
+    if (variant_id) {
+      const variant = await PetVariant.findById(variant_id);
+      if (!variant) {
+        return res.status(404).json({ message: 'Variant not found' });
+      }
+      console.log('✅ Variant verified:', variant._id);
+    } else if (pet_id) {
+      const pet = await Pet.findById(pet_id);
+      if (!pet) {
+        return res.status(404).json({ message: 'Pet not found' });
+      }
+      console.log('✅ Pet verified:', pet._id);
+    } else if (product_id) {
+      const product = await Product.findById(product_id);
+      if (!product) {
+        return res.status(404).json({ message: 'Product not found' });
+      }
+      console.log('✅ Product verified:', product._id);
+    }
+
+    // 🔧 Tạo OrderItem với variant support
+    const orderItemData = {
+      quantity: parseInt(quantity),
+      unit_price: parseFloat(unit_price),
       order_id,
-      product_id: product_id || null,
       addresses_id
-    });
+    };
 
+    // Chỉ thêm ID nào có value
+    if (variant_id) orderItemData.variant_id = variant_id;
+    if (pet_id) orderItemData.pet_id = pet_id;
+    if (product_id) orderItemData.product_id = product_id;
+
+    console.log('Final orderItemData:', orderItemData);
+
+    const orderItem = new OrderItem(orderItemData);
     const savedOrderItem = await orderItem.save();
-    res.status(201).json({ message: 'Order item created', data: savedOrderItem });
+    
+    console.log('✅ OrderItem created successfully:', savedOrderItem._id);
+    
+    res.status(201).json({ 
+      message: 'Order item created', 
+      data: savedOrderItem 
+    });
+    
   } catch (error) {
-    console.error('Create order item error:', error.message);
-    res.status(500).json({ message: error.message || 'Internal server error' });
+    console.error('❌ Create order item error:', error.message);
+    res.status(500).json({ 
+      message: error.message || 'Internal server error' 
+    });
   }
 };
 
+// 🆕 CẬP NHẬT getMyOrderItems để populate variant
 const getMyOrderItems = async (req, res) => {
   try {
     // Bước 1: Tìm tất cả Order của người dùng
     const orders = await Order.find({ user_id: req.user.userId }).select('_id').lean();
     const orderIds = orders.map(order => order._id);
 
-    // Bước 2: Tìm OrderItems có order_id trong danh sách orderIds
+    // Bước 2: Tìm OrderItems với variant support
     const orderItems = await OrderItem.find({ order_id: { $in: orderIds } })
       .populate('pet_id', 'name price')
       .populate('product_id', 'name price')
-      .populate('addresses_id', 'address')
-      .populate('order_id', 'total_amount status')
+      .populate({
+        path: 'variant_id',
+        populate: {
+          path: 'pet_id',
+          select: 'name price'
+        }
+      })
+      .populate('addresses_id', 'name phone ward district province')
+      .populate('order_id', 'total_amount status payment_method created_at')
       .lean();
-     // Populate images
-      for (let item of orderItems) {
-        if (item.pet_id) {
-          const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
-          item.pet_id.images = petImages;
+
+    // Bước 3: Populate images cho mỗi item
+    const orderItemsWithImages = await Promise.all(
+      orderItems.map(async (item) => {
+        let images = [];
+        
+        if (item.variant_id) {
+          // Variant item - lấy images từ pet của variant
+          if (item.variant_id.pet_id) {
+            images = await Image.find({ pet_id: item.variant_id.pet_id._id }).lean();
+          }
+        } else if (item.pet_id) {
+          // Direct pet item
+          images = await Image.find({ pet_id: item.pet_id._id }).lean();
+        } else if (item.product_id) {
+          // Product item
+          images = await ProductImage.find({ product_id: item.product_id._id }).lean();
         }
-        if (item.product_id) {
-          const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
-          item.product_id.images = productImages;
-        }
-      }
-    res.status(200).json({ data: orderItems });
+
+        return {
+          ...item,
+          images,
+          item_type: item.variant_id ? 'variant' : (item.pet_id ? 'pet' : 'product')
+        };
+      })
+    );
+
+    res.status(200).json({ 
+      data: orderItemsWithImages,
+      message: `Found ${orderItemsWithImages.length} order items`
+    });
+    
   } catch (error) {
-    console.error('Fetch order items error:', error);
+    console.error('❌ Fetch order items error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
 
-// orderItemsController.js
+// 🆕 CẬP NHẬT getOrderItemsByOrderId với variant support
 const getOrderItemsByOrderId = async (req, res) => {
   try {
-    const orderId = req.params.orderId;
+    const { orderId } = req.params;
+    
+    console.log('🔍 Fetching order items for order:', orderId);
 
-    // Kiểm tra xem orderId có hợp lệ không
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-
-    // Kiểm tra quyền truy cập
-    if (order.user_id.toString() !== req.user.userId && !['Admin', 'Staff'].includes(req.user.role)) {
-      return res.status(403).json({ message: 'Not authorized to access these order items' });
-    }
-
-    // Lấy danh sách các mục đơn hàng
     const orderItems = await OrderItem.find({ order_id: orderId })
+      .populate('pet_id', 'name price type breed_id')
+      .populate('product_id', 'name price description')
+      .populate({
+        path: 'variant_id',
+        populate: {
+          path: 'pet_id',
+          select: 'name price type'
+        }
+      })
+      .populate('addresses_id', 'name phone ward district province')
+      .lean();
+
+    if (!orderItems || orderItems.length === 0) {
+      return res.status(404).json({ 
+        message: 'No order items found for this order',
+        data: [] 
+      });
+    }
+
+    // Populate images
+    const orderItemsWithImages = await Promise.all(
+      orderItems.map(async (item) => {
+        let images = [];
+        let itemInfo = null;
+        let itemType = 'unknown';
+
+        if (item.variant_id) {
+          itemType = 'variant';
+          itemInfo = {
+            ...item.variant_id.pet_id,
+            variant: {
+              _id: item.variant_id._id,
+              color: item.variant_id.color,
+              weight: item.variant_id.weight,
+              gender: item.variant_id.gender,
+              age: item.variant_id.age
+            }
+          };
+          if (item.variant_id.pet_id) {
+            images = await Image.find({ pet_id: item.variant_id.pet_id._id }).lean();
+          }
+        } else if (item.pet_id) {
+          itemType = 'pet';
+          itemInfo = item.pet_id;
+          images = await Image.find({ pet_id: item.pet_id._id }).lean();
+        } else if (item.product_id) {
+          itemType = 'product';
+          itemInfo = item.product_id;
+          images = await ProductImage.find({ product_id: item.product_id._id }).lean();
+        }
+
+        return {
+          ...item,
+          item_type: itemType,
+          item_info: itemInfo,
+          images
+        };
+      })
+    );
+
+    console.log(`✅ Found ${orderItemsWithImages.length} order items`);
+    
+    res.status(200).json({ 
+      data: orderItemsWithImages,
+      message: `Found ${orderItemsWithImages.length} order items for order ${orderId}`
+    });
+    
+  } catch (error) {
+    console.error('❌ Fetch order items by order ID error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+const getOrderItemById = async (req, res) => {
+  try {
+    const orderItem = await OrderItem.findById(req.params.id)
       .populate('pet_id', 'name price')
       .populate('product_id', 'name price')
-      .populate('addresses_id', 'name phone note province district ward postal_code country')
-      .populate('order_id', 'total_amount status')
-      .lean();
-    // Populate images
-    for (let item of orderItems) {
-      if (item.pet_id) {
-        const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
-        item.pet_id.images = petImages;
-      }
-      if (item.product_id) {
-        const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
-        item.product_id.images = productImages;
-      }
+      .populate({
+        path: 'variant_id',
+        populate: {
+          path: 'pet_id',
+          select: 'name price'
+        }
+      })
+      .populate('addresses_id')
+      .populate('order_id');
+
+    if (!orderItem) {
+      return res.status(404).json({ message: 'Order item not found' });
     }
 
-    // Trả về mảng rỗng nếu không có mục đơn hàng
-    res.status(200).json({ data: orderItems });
+    res.status(200).json({ data: orderItem });
   } catch (error) {
-    console.error('Fetch order items by order ID error:', error);
+    console.error('Fetch order item error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 const updateOrderItem = async (req, res) => {
   try {
-    const updatedOrderItem = await OrderItem.findOneAndUpdate(
-      { _id: req.params.id, user_id: req.user.userId },
+    const updatedOrderItem = await OrderItem.findByIdAndUpdate(
+      req.params.id,
       req.body,
       { new: true }
     );
 
-    if (!updatedOrderItem) return res.status(404).json({ message: 'Order item not found' });
+    if (!updatedOrderItem) {
+      return res.status(404).json({ message: 'Order item not found' });
+    }
 
-    res.status(200).json({ message: 'Order item updated', data: updatedOrderItem });
+    res.status(200).json({ 
+      message: 'Order item updated', 
+      data: updatedOrderItem 
+    });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -129,189 +278,23 @@ const updateOrderItem = async (req, res) => {
 
 const deleteOrderItem = async (req, res) => {
   try {
-    const deletedOrderItem = await OrderItem.findOneAndDelete({
-      _id: req.params.id,
-      user_id: req.user.userId
-    });
+    const deletedOrderItem = await OrderItem.findByIdAndDelete(req.params.id);
 
-    if (!deletedOrderItem) return res.status(404).json({ message: 'Order item not found' });
+    if (!deletedOrderItem) {
+      return res.status(404).json({ message: 'Order item not found' });
+    }
 
     res.status(200).json({ message: 'Order item deleted' });
   } catch (error) {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
-// orderItemsController.js
-const searchOrderItems = async (req, res) => {
-  try {
-    const { query, page = 1, limit = 10 } = req.query;
-
-    if (!query) {
-      return res.status(400).json({ message: 'Search query is required' });
-    }
-
-    // Tìm các order của user
-    const orders = await Order.find({ user_id: req.user.userId }).select('_id').lean();
-    const orderIds = orders.map(order => order._id);
-
-    // Sử dụng aggregation để join và tìm kiếm
-    const orderItems = await OrderItem.aggregate([
-      // Lọc các OrderItem theo orderIds
-      { $match: { order_id: { $in: orderIds } } },
-      // Join với collection Pet
-      {
-        $lookup: {
-          from: 'pets', // Tên collection của Pet (kiểm tra tên chính xác trong MongoDB)
-          localField: 'pet_id',
-          foreignField: '_id',
-          as: 'pet_data'
-        }
-      },
-      // Join với collection Product
-      {
-        $lookup: {
-          from: 'products', // Tên collection của Product
-          localField: 'product_id',
-          foreignField: '_id',
-          as: 'product_data'
-        }
-      },
-      // Join với collection Order
-      {
-        $lookup: {
-          from: 'orders',
-          localField: 'order_id',
-          foreignField: '_id',
-          as: 'order_data'
-        }
-      },
-      // Join với collection Address
-      {
-        $lookup: {
-          from: 'addresses',
-          localField: 'addresses_id',
-          foreignField: '_id',
-          as: 'address_data'
-        }
-      },
-      // Unwind để xử lý mảng (vì $lookup trả về mảng)
-      { $unwind: { path: '$pet_data', preserveNullAndEmptyArrays: true } },
-      { $unwind: { path: '$product_data', preserveNullAndEmptyArrays: true } },
-      { $unwind: { path: '$order_data', preserveNullAndEmptyArrays: true } },
-      { $unwind: { path: '$address_data', preserveNullAndEmptyArrays: true } },
-      // Tìm kiếm theo tên pet, tên product hoặc _id
-      {
-        $match: {
-          $or: [
-            { 'pet_data.name': { $regex: query, $options: 'i' } },
-            { 'product_data.name': { $regex: query, $options: 'i' } },
-            { _id: { $regex: query, $options: 'i' } }
-          ]
-        }
-      },
-      // Phân trang
-      { $skip: (page - 1) * limit },
-      { $limit: parseInt(limit) },
-      // Project để định dạng output
-      {
-        $project: {
-          _id: 1,
-          quantity: 1,
-          unit_price: 1,
-          pet_id: { $cond: [{ $ifNull: ['$pet_data', false] }, { _id: '$pet_data._id', name: '$pet_data.name', price: '$pet_data.price' }, null] },
-          product_id: { $cond: [{ $ifNull: ['$product_data', false] }, { _id: '$product_data._id', name: '$product_data.name', price: '$product_data.price' }, null] },
-          order_id: { total_amount: '$order_data.total_amount', status: '$order_data.status' },
-          addresses_id: {
-            name: '$address_data.name',
-            phone: '$address_data.phone',
-            note: '$address_data.note',
-            province: '$address_data.province',
-            district: '$address_data.district',
-            ward: '$address_data.ward',
-            postal_code: '$address_data.postal_code',
-            country: '$address_data.country'
-          },
-          created_at: 1,
-          updated_at: 1
-        }
-      }
-    ]);
-
-    // Populate images
-    for (let item of orderItems) {
-      if (item.pet_id) {
-        const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
-        item.pet_id.images = petImages;
-      }
-      if (item.product_id) {
-        const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
-        item.product_id.images = productImages;
-      }
-    }
-
-    // Đếm tổng số kết quả
-    const totalCount = await OrderItem.aggregate([
-      { $match: { order_id: { $in: orderIds } } },
-      {
-        $lookup: {
-          from: 'pets',
-          localField: 'pet_id',
-          foreignField: '_id',
-          as: 'pet_data'
-        }
-      },
-      {
-        $lookup: {
-          from: 'products',
-          localField: 'product_id',
-          foreignField: '_id',
-          as: 'product_data'
-        }
-      },
-      { $unwind: { path: '$pet_data', preserveNullAndEmptyArrays: true } },
-      { $unwind: { path: '$product_data', preserveNullAndEmptyArrays: true } },
-      {
-        $match: {
-          $or: [
-            { 'pet_data.name': { $regex: query, $options: 'i' } },
-            { 'product_data.name': { $regex: query, $options: 'i' } },
-            { _id: { $regex: query, $options: 'i' } }
-          ]
-        }
-      },
-      { $count: 'total' }
-    ]);
-
-    const total = totalCount.length > 0 ? totalCount[0].total : 0;
-
-    res.status(200).json({
-      success: true,
-      statusCode: 200,
-      message: 'Order items retrieved successfully',
-      data: {
-        items: orderItems,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / limit),
-          totalCount: total,
-          hasNextPage: page * limit < total,
-          hasPrevPage: page > 1,
-          limit: parseInt(limit)
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Search order items error:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
 
 module.exports = {
   createOrderItem,
   getMyOrderItems,
+  getOrderItemById,
   getOrderItemsByOrderId,
   updateOrderItem,
   deleteOrderItem,
-  searchOrderItems
 };
