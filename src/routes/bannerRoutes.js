@@ -9,7 +9,7 @@ const {
   getBannerById,
   updateBanner,
   deleteBanner
-} = require('../controllers/BannerController');
+} = require('../controllers/bannerController');
 
 router.get('/', getAllBanners);                 
 router.get('/:id', getBannerById);                
