@@ -379,6 +379,103 @@ const deleteUser = async (req, res) => {
     });
   }
 };
+
+// @desc    Change password
+// @route   PUT /api/users/change-password
+// @access  Private
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    const userId = req.user.userId;
+
+    // Validation
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Please provide current password, new password, and confirm password',
+        data: null
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'New password and confirm password do not match',
+        data: null
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'New password must be at least 6 characters long',
+        data: null
+      });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Current password is incorrect',
+        data: null
+      });
+    }
+
+    // Check if new password is different from current password
+    const isSamePassword = await bcrypt.compare(newPassword, user.password_hash);
+    if (isSamePassword) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'New password must be different from current password',
+        data: null
+      });
+    }
+
+    const saltRounds = 10;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password
+    await User.findByIdAndUpdate(userId, {
+      password_hash: hashedNewPassword,
+      updated_at: new Date()
+    });
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Password changed successfully',
+      data: null
+    });
+
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 module.exports = {
   registerUser,
   loginUser,
@@ -388,5 +485,6 @@ module.exports = {
   getAllUsers,
   getUserById,
   updateUser,
-  deleteUser
+  deleteUser,
+  changePassword
 };

@@ -10,7 +10,8 @@ const {
   getAllUsers,
   getUserById,
   updateUser,
-  deleteUser
+  deleteUser,
+  changePassword
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 const requireRoles = require('../middleware/requireRole');
@@ -21,6 +22,7 @@ router.post('/login', loginUser);
 
 // user
 router.get('/me', auth, getCurrentUser);
+router.put('/change-password', auth, changePassword);
 router.get('/admin', auth, requireRoles(['Admin']), adminRoute);
 router.get('/staff', auth, requireRoles(['Admin', 'Staff']), staffRoute);
 
