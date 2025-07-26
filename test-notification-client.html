@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PetShop - Real-time Notifications Test</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.error {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .auth-form {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+            align-items: center;
+        }
+        .auth-form input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            flex: 1;
+        }
+        .auth-form button {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .auth-form button:hover {
+            background: #5a6fd8;
+        }
+        .notification {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+            animation: slideIn 0.3s ease-out;
+        }
+        .notification.new {
+            background: #e8f5e8;
+            border-left-color: #4caf50;
+        }
+        .notification.broadcast {
+            background: #fff3e0;
+            border-left-color: #ff9800;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .notification-time {
+            font-size: 0.8em;
+            color: #666;
+            float: right;
+        }
+        .unread-badge {
+            background: #f44336;
+            color: white;
+            border-radius: 50%;
+            padding: 2px 6px;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        .controls button {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .btn-primary { background: #2196f3; color: white; }
+        .btn-success { background: #4caf50; color: white; }
+        .btn-warning { background: #ff9800; color: white; }
+        .btn-danger { background: #f44336; color: white; }
+        .btn-primary:hover { background: #1976d2; }
+        .btn-success:hover { background: #45a049; }
+        .btn-warning:hover { background: #e68900; }
+        .btn-danger:hover { background: #d32f2f; }
+        .logs {
+            background: #263238;
+            color: #e0e0e0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+        .log-timestamp {
+            color: #81c784;
+        }
+        .log-event {
+            color: #64b5f6;
+        }
+        .log-data {
+            color: #ffb74d;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🐾 PetShop - Real-time Notifications</h1>
+        <p>Test client cho hệ thống thông báo real-time</p>
+    </div>
+
+    <div class="container">
+        <h2>📡 Connection Status</h2>
+        <div id="connectionStatus" class="status disconnected">
+            🔴 Disconnected from server
+        </div>
+        <div id="authStatus" class="status disconnected">
+            🔐 Not authenticated
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>🔑 Authentication</h2>
+        <div class="auth-form">
+            <input type="text" id="tokenInput" placeholder="Enter JWT token here..." style="font-family: monospace;">
+            <button onclick="authenticate()">Authenticate</button>
+        </div>
+        <p><small>💡 Nhập JWT token để xác thực và nhận thông báo real-time</small></p>
+    </div>
+
+    <div class="container">
+        <h2>🎛️ Controls</h2>
+        <div class="controls">
+            <button class="btn-primary" onclick="getUnreadNotifications()">Get Unread</button>
+            <button class="btn-success" onclick="markAllAsRead()">Mark All Read</button>
+            <button class="btn-warning" onclick="getUnreadCount()">Get Count</button>
+            <button class="btn-danger" onclick="clearNotifications()">Clear Display</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>🔔 Notifications <span id="unreadBadge" class="unread-badge" style="display:none;">0</span></h2>
+        <div id="notifications">
+            <p style="color: #666; font-style: italic;">Waiting for notifications...</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📊 System Logs</h2>
+        <div id="logs" class="logs">
+            <div class="log-entry">System initialized - waiting for connection...</div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let isAuthenticated = false;
+        let unreadCount = 0;
+
+        // Initialize Socket.IO connection
+        function initializeSocket() {
+            socket = io('http://localhost:5000');
+            
+            socket.on('connect', () => {
+                updateConnectionStatus(true);
+                log('Connected to server');
+            });
+
+            socket.on('disconnect', () => {
+                updateConnectionStatus(false);
+                updateAuthStatus(false);
+                log('Disconnected from server');
+            });
+
+            // Notification authentication events
+            socket.on('notification_authenticated', (data) => {
+                isAuthenticated = true;
+                updateAuthStatus(true, data.user);
+                log('Authenticated successfully', data);
+            });
+
+            socket.on('notification_auth_error', (data) => {
+                isAuthenticated = false;
+                updateAuthStatus(false);
+                log('Authentication failed', data);
+                alert('Authentication failed: ' + data.message);
+            });
+
+            // Notification events
+            socket.on('new_notification', (notification) => {
+                displayNotification(notification, 'new');
+                updateUnreadCount(unreadCount + 1);
+                log('New notification received', notification);
+            });
+
+            socket.on('broadcast_notification', (notification) => {
+                displayNotification(notification, 'broadcast');
+                log('Broadcast notification received', notification);
+            });
+
+            socket.on('unread_notifications', (data) => {
+                displayUnreadNotifications(data.notifications);
+                updateUnreadCount(data.count);
+                log('Unread notifications retrieved', data);
+            });
+
+            socket.on('unread_notifications_count', (data) => {
+                updateUnreadCount(data.count);
+                log('Unread count updated', data);
+            });
+
+            socket.on('notification_marked_read', (data) => {
+                log('Notification marked as read', data);
+                getUnreadCount(); // Refresh count
+            });
+
+            socket.on('all_notifications_marked_read', (data) => {
+                updateUnreadCount(0);
+                log('All notifications marked as read', data);
+            });
+
+            socket.on('notification_error', (data) => {
+                log('Notification error', data);
+                alert('Error: ' + data.message);
+            });
+        }
+
+        function authenticate() {
+            const token = document.getElementById('tokenInput').value.trim();
+            if (!token) {
+                alert('Please enter a JWT token');
+                return;
+            }
+            
+            socket.emit('authenticate_notifications', { token });
+            log('Authentication request sent');
+        }
+
+        function getUnreadNotifications() {
+            if (!isAuthenticated) {
+                alert('Please authenticate first');
+                return;
+            }
+            socket.emit('get_unread_notifications');
+            log('Requesting unread notifications');
+        }
+
+        function markAllAsRead() {
+            if (!isAuthenticated) {
+                alert('Please authenticate first');
+                return;
+            }
+            socket.emit('mark_all_notifications_read');
+            log('Marking all notifications as read');
+        }
+
+        function getUnreadCount() {
+            if (!isAuthenticated) {
+                alert('Please authenticate first');
+                return;
+            }
+            // This will be automatically sent when we authenticate
+            log('Unread count will be updated automatically');
+        }
+
+        function clearNotifications() {
+            document.getElementById('notifications').innerHTML = 
+                '<p style="color: #666; font-style: italic;">Notifications cleared...</p>';
+            log('Notification display cleared');
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusEl = document.getElementById('connectionStatus');
+            if (connected) {
+                statusEl.className = 'status connected';
+                statusEl.textContent = '🟢 Connected to server';
+            } else {
+                statusEl.className = 'status disconnected';
+                statusEl.textContent = '🔴 Disconnected from server';
+            }
+        }
+
+        function updateAuthStatus(authenticated, user = null) {
+            const statusEl = document.getElementById('authStatus');
+            if (authenticated && user) {
+                statusEl.className = 'status connected';
+                statusEl.textContent = `🟢 Authenticated as: ${user.username} (${user.role})`;
+            } else {
+                statusEl.className = 'status disconnected';
+                statusEl.textContent = '🔐 Not authenticated';
+            }
+        }
+
+        function updateUnreadCount(count) {
+            unreadCount = count;
+            const badge = document.getElementById('unreadBadge');
+            if (count > 0) {
+                badge.textContent = count;
+                badge.style.display = 'inline';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        function displayNotification(notification, type = 'normal') {
+            const container = document.getElementById('notifications');
+            if (container.innerHTML.includes('Waiting for notifications') || 
+                container.innerHTML.includes('Notifications cleared')) {
+                container.innerHTML = '';
+            }
+
+            const notifEl = document.createElement('div');
+            notifEl.className = `notification ${type}`;
+            
+            const typeIcon = type === 'broadcast' ? '📢' : type === 'new' ? '🔔' : '📨';
+            const time = new Date().toLocaleTimeString();
+            
+            notifEl.innerHTML = `
+                <div class="notification-time">${time}</div>
+                <strong>${typeIcon} ${notification.type}</strong><br>
+                ${notification.message}
+                ${notification.relatedEntityType ? `<br><small>Related: ${notification.relatedEntityType}</small>` : ''}
+            `;
+            
+            container.insertBefore(notifEl, container.firstChild);
+            
+            // Keep only last 10 notifications
+            while (container.children.length > 10) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        function displayUnreadNotifications(notifications) {
+            const container = document.getElementById('notifications');
+            container.innerHTML = '';
+            
+            if (notifications.length === 0) {
+                container.innerHTML = '<p style="color: #666; font-style: italic;">No unread notifications</p>';
+                return;
+            }
+
+            notifications.forEach(notification => {
+                displayNotification(notification, 'unread');
+            });
+        }
+
+        function log(message, data = null) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logsEl = document.getElementById('logs');
+            
+            let logEntry = `<div class="log-entry">`;
+            logEntry += `<span class="log-timestamp">[${timestamp}]</span> `;
+            logEntry += `<span class="log-event">${message}</span>`;
+            if (data) {
+                logEntry += ` <span class="log-data">${JSON.stringify(data, null, 2)}</span>`;
+            }
+            logEntry += `</div>`;
+            
+            logsEl.innerHTML = logEntry + logsEl.innerHTML;
+            
+            // Keep only last 50 log entries
+            const entries = logsEl.getElementsByClassName('log-entry');
+            while (entries.length > 50) {
+                logsEl.removeChild(entries[entries.length - 1]);
+            }
+        }
+
+        // Initialize when page loads
+        window.onload = function() {
+            initializeSocket();
+            log('Socket.IO client initialized');
+        };
+    </script>
+</body>
+</html>

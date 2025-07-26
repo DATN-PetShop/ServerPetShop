@@ -6,12 +6,23 @@ const {
   createNotification,
   getAllNotifications,
   updateNotification,
-  deleteNotification
+  deleteNotification,
+  getUserNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  getUnreadCount
 } = require('../controllers/notificationController');
 
-router.post('/', auth, requireRoles(['admin'], createNotification));
+// Admin routes
+router.post('/', auth, requireRoles(['Admin'], createNotification));
+router.delete('/:id', auth, requireRoles(['Admin'], deleteNotification));
+
+// User routes (customers can access their own notifications)
 router.get('/', auth, getAllNotifications);
+router.get('/user/my-notifications', auth, getUserNotifications);
+router.get('/user/unread-count', auth, getUnreadCount);
 router.put('/:id', auth, updateNotification);
-router.delete('/:id', auth, deleteNotification);
+router.put('/:id/read', auth, markNotificationAsRead);
+router.put('/user/mark-all-read', auth, markAllNotificationsAsRead);
 
 module.exports = router;

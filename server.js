@@ -99,6 +99,19 @@ function setupChatServices() {
     const socketHandler = new ChatSocketHandler(io);
     app.set('socketHandler', socketHandler);
     console.log('✅ Socket handler registered with Express app');
+    
+    // Set up notification socket handler
+    const NotificationSocketHandler = require('./src/socket/notificationSocketHandler');
+    const notificationSocketHandler = new NotificationSocketHandler(io);
+    app.set('notificationSocketHandler', notificationSocketHandler);
+    console.log('✅ Notification socket handler registered with Express app');
+    
+    // Set up notification service
+    const NotificationService = require('./src/services/notificationService');
+    const notificationService = new NotificationService(notificationSocketHandler);
+    app.set('notificationService', notificationService);
+    console.log('✅ Notification service registered with Express app');
+    
     const ChatRealtimeService = require('./src/services/chatRealtimeService');
     const chatRealtimeService = new ChatRealtimeService(socketHandler);
 
@@ -119,8 +132,9 @@ function setupChatServices() {
       process.exit(0);
     });
 
-    console.log('✅ Chat services initialized successfully');
+    console.log('✅ Chat and notification services initialized successfully');
 
   } catch (error) {
+    console.error('❌ Error setting up services:', error);
   }
 }

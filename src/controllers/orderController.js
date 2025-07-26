@@ -19,6 +19,18 @@ const createOrder = async (req, res) => {
 
     const savedOrder = await order.save();
 
+    // Send notification about order creation
+    try {
+      const notificationService = req.app.get('notificationService');
+      if (notificationService) {
+        await notificationService.notifyOrderCreated(req.user.userId, savedOrder._id);
+        console.log('📧 Order creation notification sent to user:', req.user.userId);
+      }
+    } catch (notifError) {
+      console.error('Failed to send order creation notification:', notifError);
+      // Continue with the response even if notification fails
+    }
+
     res.status(201).json({ message: 'Order created', data: savedOrder });
   } catch (error) {
     console.error('Create order error:', error.message);
@@ -61,6 +73,7 @@ const getOrderById = async (req, res) => {
 
 const updateOrder = async (req, res) => {
   try {
+    const { status } = req.body;
     const updatedOrder = await Order.findOneAndUpdate(
       { _id: req.params.id, user_id: req.user.userId },
       req.body,
@@ -68,6 +81,31 @@ const updateOrder = async (req, res) => {
     );
 
     if (!updatedOrder) return res.status(404).json({ message: 'Order not found' });
+
+    // Send notifications based on status change
+    try {
+      const notificationService = req.app.get('notificationService');
+      if (notificationService && status) {
+        switch (status.toLowerCase()) {
+          case 'confirmed':
+            await notificationService.notifyOrderConfirmed(req.user.userId, updatedOrder._id);
+            break;
+          case 'shipped':
+            await notificationService.notifyOrderShipped(req.user.userId, updatedOrder._id);
+            break;
+          case 'delivered':
+            await notificationService.notifyOrderDelivered(req.user.userId, updatedOrder._id);
+            break;
+          case 'cancelled':
+            await notificationService.notifyOrderCancelled(req.user.userId, updatedOrder._id);
+            break;
+        }
+        console.log(`📧 Order ${status} notification sent to user:`, req.user.userId);
+      }
+    } catch (notifError) {
+      console.error('Failed to send order update notification:', notifError);
+      // Continue with the response even if notification fails
+    }
 
     res.status(200).json({ message: 'Order updated', data: updatedOrder });
   } catch (error) {
