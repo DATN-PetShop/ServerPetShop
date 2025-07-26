@@ -4,6 +4,7 @@ const router = express.Router();
 const {
   registerUser,
   loginUser,
+  logoutUser,
   getCurrentUser,
   adminRoute,
   staffRoute,
@@ -19,6 +20,7 @@ const requireRoles = require('../middleware/requireRole');
 // Public routes
 router.post('/register', registerUser);
 router.post('/login', loginUser);
+router.post('/logout', auth, logoutUser);
 
 // user
 router.get('/me', auth, getCurrentUser);

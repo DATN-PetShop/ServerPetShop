@@ -476,9 +476,50 @@ const changePassword = async (req, res) => {
     });
   }
 };
+
+// @desc    Logout user
+// @route   POST /api/users/logout
+// @access  Private
+const logoutUser = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      updated_at: new Date()
+    });
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Logout successful',
+      data: {
+        message: 'Please remove the token from client-side storage'
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+    });
+  }
+};
 module.exports = {
   registerUser,
   loginUser,
+  logoutUser,
   getCurrentUser,
   adminRoute,
   staffRoute,
