@@ -593,6 +593,72 @@ const getCustomerUsers = async (req, res) => {
     });
   }
 };
+const updateCustomerStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    // Validate status
+    const validStatuses = ['active', 'inactive', 'suspended', 'pending'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Invalid status. Must be one of: ' + validStatuses.join(', '),
+        data: null
+      });
+    }
+    
+    // Find and update user
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    
+    // Only allow updating customers (role: User)
+    if (user.role !== 'User') {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: 'Can only update customer status',
+        data: null
+      });
+    }
+    
+    user.status = status;
+    await user.save();
+    
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Customer status updated successfully',
+      data: {
+        user: {
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+          status: user.status,
+          updated_at: user.updated_at
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Update customer status error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 module.exports = {
   registerUser,
   loginUser,
@@ -606,5 +672,6 @@ module.exports = {
   deleteUser,
   getStaffUsers,
   getCustomerUsers,
+  updateCustomerStatus,
   changePassword,
 };
