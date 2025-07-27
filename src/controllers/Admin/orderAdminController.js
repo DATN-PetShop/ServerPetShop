@@ -1,11 +1,14 @@
-// ServerPetShop/src/controllers/orderAdminController.js - Admin Order Management
+// ServerPetShop/src/controllers/orderAdminController.js - UPDATED WITH VARIANT SUPPORT
 const Order = require('../../models/Order');
 const OrderItem = require('../../models/OrderItem');
 const User = require('../../models/User');
+const Pet = require('../../models/Pet');
+const Product = require('../../models/Product');
+const PetVariant = require('../../models/PetVariant'); // 🆕 THÊM
 const ProductImage = require('../../models/ProductImage');
 const Image = require('../../models/ImagePet');
 
-// ✅ API lấy tất cả đơn hàng cho Admin
+// ✅ API lấy tất cả đơn hàng cho Admin (GIỮ NGUYÊN)
 const getAllOrders = async (req, res) => {
   try {
     const { 
@@ -120,7 +123,7 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// ✅ API cập nhật trạng thái đơn hàng cho Admin
+// ✅ API cập nhật trạng thái đơn hàng cho Admin (GIỮ NGUYÊN)
 const updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -167,11 +170,14 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
-// ✅ API lấy chi tiết đơn hàng với order items cho Admin
+// 🔧 CẬP NHẬT: API lấy chi tiết đơn hàng với order items cho Admin - THÊM VARIANT SUPPORT
 const getOrderDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
+    console.log('🔍 Getting order details for order:', id);
+
+    // 1. Lấy thông tin order
     const order = await Order.findById(id)
       .populate('user_id', 'username email phone full_name')
       .lean();
@@ -184,29 +190,117 @@ const getOrderDetails = async (req, res) => {
       });
     }
 
+    console.log('✅ Found order:', order._id);
+
+    // 2. Lấy order items với đầy đủ thông tin variant
     const orderItems = await OrderItem.find({ order_id: id })
-      .populate('pet_id', 'name price type breed_id')
-      .populate('product_id', 'name price category_id')
+      .populate({
+        path: 'pet_id',
+        select: 'name price type breed_id',
+        populate: {
+          path: 'breed_id',
+          select: 'name'
+        }
+      })
+      .populate({
+        path: 'product_id',
+        select: 'name price description category_id',
+        populate: {
+          path: 'category_id',
+          select: 'name'
+        }
+      })
+      .populate({
+        path: 'variant_id', // 🆕 THÊM populate variant
+        select: 'color weight gender age pet_id',
+        populate: {
+          path: 'pet_id',
+          select: 'name price type breed_id',
+          populate: {
+            path: 'breed_id',
+            select: 'name'
+          }
+        }
+      })
       .populate('addresses_id', 'name phone note province district ward postal_code country')
       .lean();
 
-    for (let item of orderItems) {
-      if (item.pet_id) {
-        const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
-        item.pet_id.images = petImages;
-        
-        if (item.pet_id.breed_id) {
-          await OrderItem.populate(item, {
-            path: 'pet_id.breed_id',
-            select: 'name'
-          });
+    console.log(`📋 Found ${orderItems.length} order items`);
+
+    // 3. Populate images và xử lý data với variant support
+    const orderItemsWithDetails = await Promise.all(
+      orderItems.map(async (item, index) => {
+        console.log(`🔄 Processing item ${index + 1}:`, {
+          id: item._id,
+          hasVariant: !!item.variant_id,
+          hasPet: !!item.pet_id,
+          hasProduct: !!item.product_id
+        });
+
+        let images = [];
+        let itemInfo = null;
+        let itemType = 'unknown';
+
+        if (item.variant_id) {
+          // 🏷️ Variant item
+          console.log(`🏷️ Processing variant item:`, item.variant_id);
+          
+          itemType = 'variant';
+          itemInfo = {
+            ...item.variant_id.pet_id,
+            variant: {
+              _id: item.variant_id._id,
+              color: item.variant_id.color,
+              weight: item.variant_id.weight,
+              gender: item.variant_id.gender,
+              age: item.variant_id.age
+            }
+          };
+          
+          // Lấy images từ pet của variant
+          if (item.variant_id.pet_id && item.variant_id.pet_id._id) {
+            images = await Image.find({ pet_id: item.variant_id.pet_id._id }).lean();
+            console.log(`🖼️ Found ${images.length} images for variant pet`);
+          }
+          
+        } else if (item.pet_id) {
+          // 🐕 Direct pet item
+          console.log(`🐕 Processing pet item:`, item.pet_id);
+          
+          itemType = 'pet';
+          itemInfo = item.pet_id;
+          images = await Image.find({ pet_id: item.pet_id._id }).lean();
+          console.log(`🖼️ Found ${images.length} images for pet`);
+          
+        } else if (item.product_id) {
+          // 📦 Product item
+          console.log(`📦 Processing product item:`, item.product_id);
+          
+          itemType = 'product';
+          itemInfo = item.product_id;
+          images = await ProductImage.find({ product_id: item.product_id._id }).lean();
+          console.log(`🖼️ Found ${images.length} images for product`);
         }
-      }
-      if (item.product_id) {
-        const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
-        item.product_id.images = productImages;
-      }
-    }
+
+        const processedItem = {
+          ...item,
+          item_type: itemType,
+          item_info: itemInfo,
+          images: images || []
+        };
+
+        console.log(`✅ Processed item ${index + 1}:`, {
+          id: item._id,
+          itemType,
+          hasItemInfo: !!itemInfo,
+          imageCount: images.length
+        });
+
+        return processedItem;
+      })
+    );
+
+    console.log(`✅ Successfully processed all ${orderItemsWithDetails.length} order items`);
 
     res.status(200).json({
       success: true,
@@ -214,11 +308,12 @@ const getOrderDetails = async (req, res) => {
       message: 'Order details retrieved successfully',
       data: {
         order,
-        orderItems
+        orderItems: orderItemsWithDetails
       }
     });
+
   } catch (error) {
-    console.error('Get order details error:', error);
+    console.error('❌ Get order details error:', error);
     res.status(500).json({
       success: false,
       statusCode: 500,
@@ -227,7 +322,7 @@ const getOrderDetails = async (req, res) => {
   }
 };
 
-// ✅ API thống kê đơn hàng
+// ✅ API thống kê đơn hàng (GIỮ NGUYÊN)
 const getOrderStatistics = async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
@@ -295,7 +390,7 @@ const getOrderStatistics = async (req, res) => {
   }
 };
 
-// ✅ API lấy đơn hàng theo ID cho Admin
+// ✅ API lấy đơn hàng theo ID cho Admin (GIỮ NGUYÊN)
 const getOrderByIdAdmin = async (req, res) => {
   try {
     const { id } = req.params;
@@ -328,7 +423,7 @@ const getOrderByIdAdmin = async (req, res) => {
   }
 };
 
-// ✅ API cập nhật đơn hàng cho Admin
+// ✅ API cập nhật đơn hàng cho Admin (GIỮ NGUYÊN)
 const updateOrderAdmin = async (req, res) => {
   try {
     const { id } = req.params;
@@ -364,7 +459,7 @@ const updateOrderAdmin = async (req, res) => {
   }
 };
 
-// ✅ API xóa đơn hàng cho Admin
+// ✅ API xóa đơn hàng cho Admin (GIỮ NGUYÊN)
 const deleteOrderAdmin = async (req, res) => {
   try {
     const { id } = req.params;
