@@ -27,6 +27,7 @@ const reviewRoutes = require('./src/routes/reviewsRouter');
 const appointmentRoutes = require('./src/routes/appointmentRoutes');
 const careServiceRoutes = require('./src/routes/careServiceRoutes');
 const petVariantRoutes = require('./src/routes/petVariantRoutes');
+const statisticsRoutes = require('./src/routes/statisticsRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -80,7 +81,8 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/order_items', orderItemRoutes);
 app.use('/', vnpayRoutes);
 app.use('/api/favourites', favouriteRoutes);
-app.use('/api/pet-variants', petVariantRoutes); // 🆕 THÊM MỚI
+app.use('/api/pet-variants', petVariantRoutes); // 
+app.use('/api/statistics', statisticsRoutes); // Thống kê
 
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
