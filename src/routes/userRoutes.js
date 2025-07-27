@@ -10,7 +10,8 @@ const {
   staffRoute,
   getAllUsers,
   getStaffUsers, // Import function mới
-  getCustomerUsers, // Import function mới
+  getCustomerUsers, // Import function mới,
+  updateCustomerStatus, // Import function mới
   getUserById,
   updateUser,
   deleteUser,
@@ -33,9 +34,10 @@ router.get('/staff', auth, requireRoles(['Admin', 'Staff']), staffRoute);
 router.get('/', auth, requireRoles(['Admin']), getAllUsers);
 router.get('/staff-only', auth, requireRoles(['Admin']), getStaffUsers); // Route mới
 router.get('/customers', auth, requireRoles(['Admin', 'Staff']), getCustomerUsers);     // ← Route mới
+router.patch('/:id/status', auth, requireRoles(['Admin']), updateCustomerStatus); // ← Route mới
 
 router.get('/:id', auth, requireRoles(['Admin', 'Staff']), getUserById);
-router.put('/:id', auth, requireRoles(['Admin']), updateUser);
+router.put('/:id', auth, updateUser);
 router.delete('/:id', auth, requireRoles(['Admin']), deleteUser);
 
 module.exports = router;
