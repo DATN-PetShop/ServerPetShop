@@ -9,6 +9,8 @@ const {
   adminRoute,
   staffRoute,
   getAllUsers,
+  getStaffUsers, // Import function mới
+  getCustomerUsers, // Import function mới
   getUserById,
   updateUser,
   deleteUser,
@@ -29,6 +31,9 @@ router.get('/admin', auth, requireRoles(['Admin']), adminRoute);
 router.get('/staff', auth, requireRoles(['Admin', 'Staff']), staffRoute);
 
 router.get('/', auth, requireRoles(['Admin']), getAllUsers);
+router.get('/staff-only', auth, requireRoles(['Admin']), getStaffUsers); // Route mới
+router.get('/customers', auth, requireRoles(['Admin', 'Staff']), getCustomerUsers);     // ← Route mới
+
 router.get('/:id', auth, requireRoles(['Admin', 'Staff']), getUserById);
 router.put('/:id', auth, requireRoles(['Admin']), updateUser);
 router.delete('/:id', auth, requireRoles(['Admin']), deleteUser);

@@ -516,6 +516,83 @@ const logoutUser = async (req, res) => {
     });
   }
 };
+
+const getStaffUsers = async (req, res) => {
+  try {
+    const staffUsers = await User.find({ role: 'Staff' }).select('-password_hash').sort({ created_at: -1 });
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Staff users retrieved successfully',
+      data: { users: staffUsers }
+    });
+  } catch (error) {
+    console.error('Get staff users error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+const getCustomerUsers = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search, sortBy = 'created_at', sortOrder = 'desc' } = req.query;
+    
+    // Build filter for customers (role = 'User')
+    let filter = { role: 'User' };
+    
+    // Add search functionality
+    if (search) {
+      filter.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Calculate pagination
+    const skip = (Number(page) - 1) * Number(limit);
+    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+    
+    // Execute query
+    const customers = await User.find(filter)
+      .select('-password_hash')
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit));
+    
+    // Get total count for pagination
+    const totalCount = await User.countDocuments(filter);
+    const totalPages = Math.ceil(totalCount / Number(limit));
+    
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Customer users retrieved successfully',
+      data: { 
+        users: customers,
+        pagination: {
+          currentPage: Number(page),
+          totalPages,
+          totalCount,
+          limit: Number(limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get customer users error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 module.exports = {
   registerUser,
   loginUser,
@@ -527,5 +604,7 @@ module.exports = {
   getUserById,
   updateUser,
   deleteUser,
-  changePassword
+  getStaffUsers,
+  getCustomerUsers,
+  changePassword,
 };
