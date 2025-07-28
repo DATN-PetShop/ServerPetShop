@@ -1,3 +1,4 @@
+// src/controllers/categoryController.js
 const Category = require('../models/Category');
 const CategoryImage = require('../models/CategoryImage');
 const BaseCrudController = require('./baseCrudController');
@@ -49,11 +50,13 @@ class CategoryController extends BaseCrudController {
     }
   }
 
+  // ✅ FIXED: Complete create method
   async create(req, res) {
     try {
       const requiredFields = this.getRequiredFields();
       const data = { ...req.body }; 
 
+      // Validate required fields
       for (const field of requiredFields) {
         if (!data[field]) {
           return res.status(400).json({
@@ -65,18 +68,21 @@ class CategoryController extends BaseCrudController {
         }
       }
 
+      // Create new category
       const entity = new this.model(data);
       const savedEntity = await entity.save();
 
+      // Handle image uploads if any
       if (this.imageModel && req.files && req.files.length > 0) {
         const imageDocs = req.files.map((file, index) => ({
-          url: file.path, 
+          url: file.path, // Cloudinary URL
           is_primary: index === 0, 
           [this.getImageForeignKey()]: savedEntity._id
         }));
         
         await this.imageModel.insertMany(imageDocs);
         
+        // Fetch images to include in response
         const images = await this.imageModel.find({ 
           [this.getImageForeignKey()]: savedEntity._id 
         }).lean();
@@ -86,10 +92,11 @@ class CategoryController extends BaseCrudController {
       res.status(201).json({
         success: true,
         statusCode: 201,
-        message: `${this.getEntityName()} created`,
+        message: `${this.getEntityName()} created successfully`,
         data: savedEntity
       });
     } catch (error) {
+      // Handle duplicate key error (unique constraint)
       if (error.code === 11000) {
         return res.status(409).json({
           success: false,
@@ -110,10 +117,13 @@ class CategoryController extends BaseCrudController {
     }
   }
 
+  // ✅ FIXED: Override update method to work without user_id constraint
   async update(req, res) {
     try {
-      const updated = await this.model.findOneAndUpdate(
-        { _id: req.params.id },
+      const { cloudinary } = require('../config/cloudinaryConfig');
+      
+      const updated = await this.model.findByIdAndUpdate(
+        req.params.id, // No user_id constraint for categories
         req.body,
         { new: true }
       );
@@ -127,13 +137,13 @@ class CategoryController extends BaseCrudController {
         });
       }
 
+      // Handle new images if uploaded
       if (this.imageModel && req.files && req.files.length > 0) {
-        const oldImages = await this.imageModel.find({ 
-          [this.getImageForeignKey()]: updated._id 
-        });
+        // Get old images to delete from Cloudinary
+        const oldImages = await this.imageModel.find({ [this.getImageForeignKey()]: updated._id });
         
+        // Delete old images from Cloudinary
         if (oldImages.length > 0) {
-          const { cloudinary } = require('../config/cloudinaryConfig');
           const deletePromises = oldImages.map(async (img) => {
             try {
               const publicId = this.extractPublicIdFromUrl(img.url);
@@ -147,20 +157,19 @@ class CategoryController extends BaseCrudController {
           await Promise.allSettled(deletePromises);
         }
 
-        await this.imageModel.deleteMany({ 
-          [this.getImageForeignKey()]: updated._id 
-        });
+        // Delete old image records from database
+        await this.imageModel.deleteMany({ [this.getImageForeignKey()]: updated._id });
 
+        // Add new images
         const imageDocs = req.files.map((file, index) => ({
-          url: file.path, 
-          is_primary: index === 0, 
+          url: file.path, // Cloudinary URL
+          is_primary: index === 0,
           [this.getImageForeignKey()]: updated._id
         }));
         
         await this.imageModel.insertMany(imageDocs);
-      }
-
-      if (this.imageModel) {
+        
+        // Include images in response
         const images = await this.imageModel.find({ 
           [this.getImageForeignKey()]: updated._id 
         }).lean();
@@ -170,7 +179,7 @@ class CategoryController extends BaseCrudController {
       res.status(200).json({
         success: true,
         statusCode: 200,
-        message: `${this.getEntityName()} updated`,
+        message: `${this.getEntityName()} updated successfully`,
         data: updated
       });
     } catch (error) {
@@ -184,9 +193,12 @@ class CategoryController extends BaseCrudController {
     }
   }
 
+  // ✅ FIXED: Override delete method to work without user_id constraint
   async delete(req, res) {
     try {
-      const deleted = await this.model.findOneAndDelete({ _id: req.params.id });
+      const { cloudinary } = require('../config/cloudinaryConfig');
+      
+      const deleted = await this.model.findByIdAndDelete(req.params.id); // No user_id constraint
       
       if (!deleted) {
         return res.status(404).json({
@@ -197,13 +209,12 @@ class CategoryController extends BaseCrudController {
         });
       }
 
+      // Delete related images from Cloudinary and database
       if (this.imageModel) {
-        const imagesToDelete = await this.imageModel.find({ 
-          [this.getImageForeignKey()]: deleted._id 
-        });
+        const imagesToDelete = await this.imageModel.find({ [this.getImageForeignKey()]: deleted._id });
         
+        // Delete images from Cloudinary
         if (imagesToDelete.length > 0) {
-          const { cloudinary } = require('../config/cloudinaryConfig');
           const deletePromises = imagesToDelete.map(async (img) => {
             try {
               const publicId = this.extractPublicIdFromUrl(img.url);
@@ -217,15 +228,13 @@ class CategoryController extends BaseCrudController {
           await Promise.allSettled(deletePromises);
         }
 
-        await this.imageModel.deleteMany({ 
-          [this.getImageForeignKey()]: deleted._id 
-        });
+        await this.imageModel.deleteMany({ [this.getImageForeignKey()]: deleted._id });
       }
 
       res.status(200).json({
         success: true,
         statusCode: 200,
-        message: `${this.getEntityName()} deleted`,
+        message: `${this.getEntityName()} deleted successfully`,
         data: null
       });
     } catch (error) {
@@ -236,6 +245,22 @@ class CategoryController extends BaseCrudController {
         message: 'Internal server error',
         data: null
       });
+    }
+  }
+
+  // ✅ Helper method to extract public_id from Cloudinary URL
+  extractPublicIdFromUrl(url) {
+    try {
+      const parts = url.split('/');
+      const uploadIndex = parts.indexOf('upload');
+      if (uploadIndex !== -1 && uploadIndex + 2 < parts.length) {
+        const publicIdWithExt = parts.slice(uploadIndex + 2).join('/');
+        return publicIdWithExt.split('.')[0]; // Remove file extension
+      }
+      return null;
+    } catch (error) {
+      console.error('Error extracting public_id:', error);
+      return null;
     }
   }
 

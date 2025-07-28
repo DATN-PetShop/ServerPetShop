@@ -51,35 +51,118 @@ class PetController extends BaseCrudController {
     }
   }
 
-  async getAllPetsAdmin(req, res) {
-    try {
-      const pets = await this.model.find()
-        .populate('breed_id', 'name description')
-        .lean();
+// Thay thế method getAllPetsAdmin trong petController.js
+async getAllPetsAdmin(req, res) {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      sortBy = 'created_at',
+      sortOrder = 'desc',
+      search,
+      type,
+      status,
+      breed_id,
+      minPrice,
+      maxPrice,
+      age,
+      gender
+    } = req.query;
 
-      if (this.imageModel) {
-        for (let pet of pets) {
-          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
-          pet.images = images;
-        }
-      }
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'All pets for admin retrieved successfully',
-        data: pets
-      });
-    } catch (error) {
-      console.error('Get all pets admin error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
+    // Build filter object
+    const filter = {};
+    
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { type: { $regex: search, $options: 'i' } }
+      ];
     }
+    
+    if (type) filter.type = type;
+    if (status) filter.status = status;
+    if (breed_id) filter.breed_id = breed_id;
+    if (gender) filter.gender = gender;
+    if (age) filter.age = age;
+    
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
+
+    // Sort configuration
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Pagination
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // Get pets with population
+    const pets = await this.model.find(filter)
+      .populate('breed_id', 'name description category_id')
+      .populate({
+        path: 'breed_id',
+        populate: {
+          path: 'category_id',
+          select: 'name description'
+        }
+      })
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    // Get images for each pet
+    if (this.imageModel) {
+      for (let pet of pets) {
+        const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+        pet.images = images;
+      }
+    }
+
+    // Get total count for pagination
+    const totalCount = await this.model.countDocuments(filter);
+    const totalPages = Math.ceil(totalCount / Number(limit));
+
+    // Calculate statistics
+    const allPets = await this.model.find(filter).lean();
+    const statistics = {
+      totalPets: allPets.length,
+      availablePets: allPets.filter(p => p.status === 'available').length,
+      soldPets: allPets.filter(p => p.status === 'sold').length,
+      reservedPets: allPets.filter(p => p.status === 'reserved').length,
+      totalValue: allPets.reduce((sum, p) => sum + p.price, 0),
+      averagePrice: allPets.length > 0 ? allPets.reduce((sum, p) => sum + p.price, 0) / allPets.length : 0
+    };
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Pets retrieved successfully',
+      data: {
+        pets,
+        pagination: {
+          currentPage: Number(page),
+          totalPages,
+          totalCount,
+          limit: Number(limit)
+        },
+        statistics
+      }
+    });
+
+  } catch (error) {
+    console.error('Get all pets admin error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
   }
+}
 
 async searchPets(req, res) {
   try {
