@@ -19,5 +19,5 @@ const categoryImageSchema = new mongoose.Schema({
     default: Date.now
   }
 });
-
+categoryImageSchema.index({ category_id: 1 });
 module.exports = mongoose.model('CategoryImage', categoryImageSchema);
