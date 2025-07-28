@@ -2,6 +2,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { sendWelcomeNotification } = require('../services/notificationService');
 
 // Generate JWT Token
 const generateToken = (userId, role) => {
@@ -56,6 +57,15 @@ const registerUser = async (req, res) => {
 
     // Generate token
     const token = generateToken(savedUser._id, savedUser.role);
+
+    // Gửi notification chào mừng cho user mới (không blocking)
+    setTimeout(async () => {
+      try {
+        await sendWelcomeNotification(savedUser._id, savedUser.username);
+      } catch (notificationError) {
+        console.error('Failed to send welcome notification:', notificationError);
+      }
+    }, 1000); // Delay 1 giây để user có thể lưu push token
 
     // Return success response
     res.status(201).json({
