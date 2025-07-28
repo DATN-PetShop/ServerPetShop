@@ -1,4 +1,5 @@
 const Order = require('../models/Order');
+const { sendOrderNotification } = require('../services/notificationService');
 
 const createOrder = async (req, res) => {
   try {
@@ -18,6 +19,14 @@ const createOrder = async (req, res) => {
     });
 
     const savedOrder = await order.save();
+
+    // Gửi notification cho user khi tạo đơn hàng thành công
+    try {
+      await sendOrderNotification(req.user.userId, savedOrder._id, 'created');
+    } catch (notificationError) {
+      console.error('Failed to send order notification:', notificationError);
+      // Không làm fail request chính nếu notification lỗi
+    }
 
     res.status(201).json({ message: 'Order created', data: savedOrder });
   } catch (error) {

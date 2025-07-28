@@ -1,4 +1,4 @@
-// src/controllers/appointmentController.js
+// src/controllers/appointmentController.js - CẬP NHẬT HỖ TRỢ VARIANT với FALLBACK
 const Appointment = require('../models/Appointment');
 const CareService = require('../models/CareService');
 const Pet = require('../models/Pet');
@@ -16,20 +16,11 @@ class AppointmentController {
           message: 'Không xác thực được người dùng'
         });
       }
-      const { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount } = req.body;
+      const { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount, variant_id, item_type } = req.body;
 
       // Log request body và user_id
-      console.log('createAppointment - Request body:', { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount });
+      console.log('createAppointment - Request body:', { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount, variant_id, item_type });
       console.log('createAppointment - Authenticated user_id:', user_id);
-
-      // Validation
-    //   if (!pet_id || !service_id || !appointment_date || !appointment_time || !order_id || !total_amount) {
-    //     console.log('createAppointment - Validation failed: Missing required fields');
-    //     return res.status(400).json({
-    //       success: false,
-    //       message: 'Thiếu thông tin bắt buộc: pet_id, service_id, appointment_date, appointment_time, order_id, total_amount'
-    //     });
-    //   }
 
       // Kiểm tra định dạng appointment_time
       if (!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(appointment_time)) {
@@ -52,29 +43,112 @@ class AppointmentController {
       }
       console.log('createAppointment - Order found:', order);
 
-      // Kiểm tra pet_id trong OrderItem của đơn hàng
-      console.log('createAppointment - Checking order item:', { order_id, pet_id });
-      const orderItem = await OrderItem.findOne({ order_id, pet_id });
+      // 🔧 CẬP NHẬT: Kiểm tra OrderItem - hỗ trợ cả pet_id và variant_id với FALLBACK
+      console.log('createAppointment - Checking order item:', { order_id, pet_id, variant_id, item_type });
+      
+      let orderItem = null;
+      let validatedPetId = pet_id;
+
+      // 🆕 STRATEGY 1: Nếu có variant_id, tìm theo variant_id
+      if (variant_id && item_type === 'variant') {
+        console.log('createAppointment - Looking for variant order item:', { order_id, variant_id });
+        
+        orderItem = await OrderItem.findOne({ 
+          order_id: order_id,
+          variant_id: variant_id 
+        }).populate({
+          path: 'variant_id',
+          populate: {
+            path: 'pet_id',
+            select: '_id name type breed_id age'
+          }
+        });
+
+        if (orderItem) {
+          console.log('createAppointment - Variant OrderItem found:', orderItem);
+          
+          // Validate pet_id từ variant
+          if (orderItem.variant_id && orderItem.variant_id.pet_id) {
+            const variantPetId = orderItem.variant_id.pet_id._id.toString();
+            console.log('createAppointment - Variant pet_id:', variantPetId, 'Requested pet_id:', pet_id);
+            
+            if (variantPetId !== pet_id) {
+              console.log('createAppointment - Pet ID mismatch with variant');
+              return res.status(400).json({
+                success: false,
+                message: 'Pet ID không khớp với variant trong đơn hàng'
+              });
+            }
+            validatedPetId = variantPetId;
+          } else {
+            console.log('createAppointment - Variant found but no pet_id in variant');
+            return res.status(400).json({
+              success: false,
+              message: 'Variant không có thông tin pet hợp lệ'
+            });
+          }
+        }
+      }
+
+      // 🆕 STRATEGY 2: Nếu chưa tìm thấy, tìm theo pet_id trực tiếp
       if (!orderItem) {
-        console.log('createAppointment - OrderItem not found:', { order_id, pet_id });
-        return res.status(404).json({
-          success: false,
-          message: 'Không tìm thấy thú cưng trong đơn hàng đã mua'
+        console.log('createAppointment - Looking for direct pet order item:', { order_id, pet_id });
+        orderItem = await OrderItem.findOne({ 
+          order_id: order_id,
+          pet_id: pet_id 
         });
       }
-      console.log('createAppointment - OrderItem found:', orderItem);
+
+      // 🆕 STRATEGY 3: FALLBACK - Tìm variant có pet_id này trong order
+      if (!orderItem) {
+        console.log('createAppointment - Fallback: Looking for any variant with this pet_id in order:', { order_id, pet_id });
+        
+        // Tìm tất cả OrderItems có variant_id trong order này
+        const variantOrderItems = await OrderItem.find({ 
+          order_id: order_id,
+          variant_id: { $exists: true, $ne: null }
+        }).populate({
+          path: 'variant_id',
+          populate: {
+            path: 'pet_id',
+            select: '_id name type breed_id age'
+          }
+        });
+
+        console.log('createAppointment - Found variant order items:', variantOrderItems.length);
+
+        // Tìm variant có pet_id khớp
+        for (const item of variantOrderItems) {
+          if (item.variant_id && item.variant_id.pet_id && 
+              item.variant_id.pet_id._id.toString() === pet_id) {
+            console.log('createAppointment - Found matching variant item:', item._id);
+            orderItem = item;
+            validatedPetId = pet_id;
+            break;
+          }
+        }
+      }
+
+      if (!orderItem) {
+        console.log('createAppointment - OrderItem not found after all strategies:', { order_id, pet_id, variant_id });
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy thú cưng trong đơn hàng đã mua. Vui lòng kiểm tra lại thông tin đơn hàng.'
+        });
+      }
+      console.log('createAppointment - OrderItem found:', orderItem._id);
 
       // Kiểm tra pet tồn tại
-      console.log('createAppointment - Checking pet:', pet_id);
-      const pet = await Pet.findById(pet_id);
+      console.log('createAppointment - Checking pet:', validatedPetId);
+      const pet = await Pet.findById(validatedPetId);
       if (!pet) {
-        console.log('createAppointment - Pet not found:', pet_id);
+        console.log('createAppointment - Pet not found:', validatedPetId);
         return res.status(404).json({
           success: false,
           message: 'Không tìm thấy thú cưng'
         });
       }
-      console.log('createAppointment - Pet found:', pet);
+      console.log('createAppointment - Pet found:', pet.name);
 
       // Kiểm tra service tồn tại
       console.log('createAppointment - Checking service:', service_id);
@@ -86,7 +160,7 @@ class AppointmentController {
           message: 'Dịch vụ không tồn tại hoặc đã ngừng hoạt động'
         });
       }
-      console.log('createAppointment - Service found:', service);
+      console.log('createAppointment - Service found:', service.name);
 
       // Kiểm tra total_amount khớp với giá dịch vụ
       if (total_amount !== service.price) {
@@ -116,7 +190,7 @@ class AppointmentController {
         status: { $nin: ['cancelled'] }
       });
       if (existingAppointment) {
-        console.log('createAppointment - Conflicting appointment found:', existingAppointment);
+        console.log('createAppointment - Conflicting appointment found:', existingAppointment._id);
         return res.status(409).json({
           success: false,
           message: 'Khung giờ này đã được đặt'
@@ -127,9 +201,9 @@ class AppointmentController {
       console.log('createAppointment - Creating new appointment');
       const appointment = new Appointment({
         user_id,
-        pet_id,
+        pet_id: validatedPetId, // Sử dụng validated pet_id
         service_id,
-        order_id, // Thêm dòng này
+        order_id,
         appointment_date: new Date(appointment_date),
         appointment_time,
         notes,
@@ -471,14 +545,11 @@ class AppointmentController {
         });
       }
 
-      // Khung giờ mặc định (9:00 - 17:00)
-      const workingHours = [];
-      for (let hour = 9; hour <= 17; hour++) {
-        workingHours.push(`${hour.toString().padStart(2, '0')}:00`);
-        if (hour < 17) {
-          workingHours.push(`${hour.toString().padStart(2, '0')}:30`);
-        }
-      }
+      // Khung giờ mặc định (8:00 - 17:00)
+      const workingHours = [
+        '08:00', '09:00', '10:00', '11:00', 
+        '14:00', '15:00', '16:00', '17:00'
+      ];
 
       // Lấy các lịch hẹn đã đặt trong ngày
       const bookedAppointments = await Appointment.find({
@@ -492,11 +563,7 @@ class AppointmentController {
       res.status(200).json({
         success: true,
         message: 'Lấy khung giờ trống thành công',
-        data: {
-          date,
-          availableSlots,
-          bookedSlots
-        }
+        data: availableSlots
       });
     } catch (error) {
       console.error('Get available slots error:', error);

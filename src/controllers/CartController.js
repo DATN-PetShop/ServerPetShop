@@ -1,50 +1,95 @@
-// src/controllers/cartController.js
+// src/controllers/cartController.js - CẬP NHẬT HOÀN CHỈNH
 const mongoose = require('mongoose');
 const Cart = require('../models/Cart');
 const Pet = require('../models/Pet');
 const Product = require('../models/Product');
+const PetVariant = require('../models/PetVariant'); // 🆕 THÊM MỚI
 const Image = require('../models/ImagePet');
 const ProductImage = require('../models/ProductImage');
 
 class CartController {
   async addToCart(req, res) {
     try {
-      const { pet_id, product_id, quantity = 1 } = req.body;
+      const { pet_id, product_id, variant_id, quantity = 1 } = req.body; // 🆕 THÊM variant_id
       const user_id = req.user.userId;
 
+      console.log('🛒 Add to cart request:', { user_id, pet_id, product_id, variant_id, quantity });
 
-      // Validation cơ bản
-      if (!pet_id && !product_id) {
+      // 🆕 Validation cập nhật cho variant
+      const itemTypes = [pet_id, product_id, variant_id].filter(Boolean);
+      if (itemTypes.length === 0) {
         return res.status(400).json({
           success: false,
           statusCode: 400,
-          message: 'Must provide either pet_id or product_id',
+          message: 'Must provide either pet_id, product_id, or variant_id',
           data: null
         });
       }
 
-      if (pet_id && product_id) {
+      if (itemTypes.length > 1) {
         return res.status(400).json({
           success: false,
           statusCode: 400,
-          message: 'Cannot add both pet and product in one cart item',
+          message: 'Can only add one type of item at a time',
           data: null
         });
       }
 
-      if (pet_id) {
-        const pet = await Pet.findById(pet_id);
-        if (!pet) {
-          return res.status(404).json({
+      if (quantity <= 0) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'Quantity must be greater than 0',
+          data: null
+        });
+      }
+
+      // 🆕 Kiểm tra item tồn tại và available
+      let itemData = null;
+      let itemPrice = 0;
+
+      if (variant_id) {
+        // Add pet variant to cart
+        const variant = await PetVariant.findById(variant_id)
+          .populate('pet_id', 'name price status');
+        
+        if (!variant || !variant.is_available || variant.stock_quantity < quantity) {
+          return res.status(400).json({
             success: false,
-            statusCode: 404,
-            message: 'Pet not found',
+            statusCode: 400,
+            message: 'Variant not available or insufficient stock',
             data: null
           });
         }
-      }
 
-      if (product_id) {
+        if (variant.pet_id.status !== 'available') {
+          return res.status(400).json({
+            success: false,
+            statusCode: 400,
+            message: 'Pet is not available for purchase',
+            data: null
+          });
+        }
+
+        itemData = variant;
+        itemPrice = variant.pet_id.price + variant.price_adjustment;
+
+      } else if (pet_id) {
+        // Legacy: Add pet directly (without variant)
+        const pet = await Pet.findById(pet_id);
+        if (!pet || pet.status !== 'available') {
+          return res.status(404).json({
+            success: false,
+            statusCode: 404,
+            message: 'Pet not found or not available',
+            data: null
+          });
+        }
+        itemData = pet;
+        itemPrice = pet.price;
+
+      } else if (product_id) {
+        // Add product to cart
         const product = await Product.findById(product_id);
         if (!product) {
           return res.status(404).json({
@@ -54,28 +99,53 @@ class CartController {
             data: null
           });
         }
+        itemData = product;
+        itemPrice = product.price;
       }
 
+      // 🆕 Sử dụng method findExistingItem đã cập nhật
       let existingCartItem = null;
       
-      if (pet_id) {
+      if (variant_id) {
+        existingCartItem = await Cart.findOne({
+          user_id: new mongoose.Types.ObjectId(user_id),
+          variant_id: new mongoose.Types.ObjectId(variant_id),
+          pet_id: { $in: [null, undefined] },
+          product_id: { $in: [null, undefined] }
+        });
+      } else if (pet_id) {
         existingCartItem = await Cart.findOne({
           user_id: new mongoose.Types.ObjectId(user_id),
           pet_id: new mongoose.Types.ObjectId(pet_id),
+          variant_id: { $in: [null, undefined] },
           product_id: { $in: [null, undefined] }
         });
       } else if (product_id) {
         existingCartItem = await Cart.findOne({
           user_id: new mongoose.Types.ObjectId(user_id),
           product_id: new mongoose.Types.ObjectId(product_id),
-          pet_id: { $in: [null, undefined] }
+          pet_id: { $in: [null, undefined] },
+          variant_id: { $in: [null, undefined] }
         });
       }
       
       if (existingCartItem) {
+        const newQuantity = existingCartItem.quantity + parseInt(quantity);
         
-        existingCartItem.quantity += parseInt(quantity);
+        // 🆕 Kiểm tra stock nếu là variant
+        if (variant_id && newQuantity > itemData.stock_quantity) {
+          return res.status(400).json({
+            success: false,
+            statusCode: 400,
+            message: 'Not enough stock available',
+            data: null
+          });
+        }
+        
+        existingCartItem.quantity = newQuantity;
         const updatedItem = await existingCartItem.save();
+        
+        console.log('✅ Updated existing cart item:', updatedItem._id);
         
         return res.status(200).json({
           success: true,
@@ -85,13 +155,15 @@ class CartController {
         });
       }
 
-      
+      // Tạo cart item mới
       const cartItemData = {
         user_id: new mongoose.Types.ObjectId(user_id),
         quantity: parseInt(quantity)
       };
 
-      if (pet_id) {
+      if (variant_id) {
+        cartItemData.variant_id = new mongoose.Types.ObjectId(variant_id); // 🆕
+      } else if (pet_id) {
         cartItemData.pet_id = new mongoose.Types.ObjectId(pet_id);
       } else if (product_id) {
         cartItemData.product_id = new mongoose.Types.ObjectId(product_id);
@@ -100,6 +172,7 @@ class CartController {
       const newCartItem = new Cart(cartItemData);
       const savedCartItem = await newCartItem.save();
       
+      console.log('✅ Added new item to cart:', savedCartItem._id);
 
       res.status(201).json({
         success: true,
@@ -109,6 +182,7 @@ class CartController {
       });
 
     } catch (error) {
+      console.error('❌ Add to cart error:', error);
       
       if (error.code === 11000) {
         return res.status(409).json({
@@ -138,52 +212,107 @@ class CartController {
     }
   }
 
-  // Lấy giỏ hàng của user
+  // 🆕 Cập nhật method getCart để hỗ trợ variant
   async getCart(req, res) {
     try {
       const user_id = req.user.userId;
+      console.log('🛒 Fetching cart for user:', user_id);
 
       const cartItems = await Cart.find({ user_id })
         .populate('pet_id', 'name price type age weight gender status')
         .populate('product_id', 'name price description')
+        .populate({
+          path: 'variant_id',
+          populate: {
+            path: 'pet_id',
+            select: 'name price status type'
+          }
+        })
         .sort({ added_at: -1 })
         .lean();
 
-      // Populate images
-      for (let item of cartItems) {
-        if (item.pet_id) {
-          const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
-          item.pet_id.images = petImages;
-        }
-        if (item.product_id) {
-          const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
-          item.product_id.images = productImages;
-        }
-      }
+      console.log(`📦 Found ${cartItems.length} items in cart`);
+
+      // 🆕 Populate images và tính final price với variant support
+      const itemsWithDetails = await Promise.all(
+        cartItems.map(async (item) => {
+          let finalPrice = 0;
+          let itemInfo = null;
+          let itemType = 'unknown';
+
+          if (item.variant_id) {
+            // Pet variant item
+            const variant = item.variant_id;
+            finalPrice = variant.pet_id.price + variant.price_adjustment;
+            itemType = 'variant';
+            
+            // Get pet images
+            const petImages = await Image.find({ pet_id: variant.pet_id._id }).lean();
+            
+            itemInfo = {
+              ...variant.pet_id,
+              variant: {
+                _id: variant._id,
+                color: variant.color,
+                weight: variant.weight,
+                gender: variant.gender,
+                age: variant.age,
+                display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age}Y`
+              },
+              images: petImages
+            };
+
+          } else if (item.pet_id) {
+            // Legacy pet item
+            finalPrice = item.pet_id.price;
+            itemType = 'pet';
+            const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
+            itemInfo = { ...item.pet_id, images: petImages };
+
+          } else if (item.product_id) {
+            // Product item
+            finalPrice = item.product_id.price;
+            itemType = 'product';
+            const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
+            itemInfo = { ...item.product_id, images: productImages };
+          }
+
+          return {
+            _id: item._id,
+            quantity: item.quantity,
+            added_at: item.added_at,
+            item_type: itemType,
+            item_info: itemInfo,
+            unit_price: finalPrice,
+            total_price: finalPrice * item.quantity
+          };
+        })
+      );
 
       // Tính tổng
-      let totalAmount = 0;
-      let totalQuantity = 0;
-      
-      cartItems.forEach(item => {
-        const price = item.pet_id ? item.pet_id.price : item.product_id.price;
-        totalAmount += price * item.quantity;
-        totalQuantity += item.quantity;
-      });
+      const totalAmount = itemsWithDetails.reduce((sum, item) => sum + item.total_price, 0);
+      const totalQuantity = itemsWithDetails.reduce((sum, item) => sum + item.quantity, 0);
 
       res.status(200).json({
         success: true,
         statusCode: 200,
         message: 'Cart retrieved successfully',
         data: {
-          items: cartItems,
-          totalItems: cartItems.length,
+          items: itemsWithDetails,
+          totalItems: itemsWithDetails.length,
           totalQuantity: totalQuantity,
-          totalAmount: totalAmount
+          totalAmount: totalAmount,
+          // 🆕 Thêm summary format mới cho frontend
+          summary: {
+            total_items: totalQuantity,
+            total_amount: totalAmount,
+            item_count: itemsWithDetails.length
+          }
         }
       });
 
     } catch (error) {
+      console.error('❌ Get cart error:', error);
       res.status(500).json({
         success: false,
         statusCode: 500,
@@ -210,12 +339,9 @@ class CartController {
         });
       }
 
-      const cartItem = await Cart.findOneAndUpdate(
-        { _id: id, user_id },
-        { quantity: parseInt(quantity) },
-        { new: true }
-      ).populate('pet_id', 'name price')
-        .populate('product_id', 'name price');
+      // 🆕 Kiểm tra stock limit nếu là variant
+      const cartItem = await Cart.findOne({ _id: id, user_id })
+        .populate('variant_id');
 
       if (!cartItem) {
         return res.status(404).json({
@@ -226,14 +352,39 @@ class CartController {
         });
       }
 
+      // Kiểm tra stock nếu là variant
+      if (cartItem.variant_id && quantity > cartItem.variant_id.stock_quantity) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'Not enough stock available',
+          data: null
+        });
+      }
+
+      const updatedCartItem = await Cart.findOneAndUpdate(
+        { _id: id, user_id },
+        { quantity: parseInt(quantity) },
+        { new: true }
+      ).populate('pet_id', 'name price')
+        .populate('product_id', 'name price')
+        .populate({
+          path: 'variant_id',
+          populate: {
+            path: 'pet_id',
+            select: 'name price'
+          }
+        });
+
       res.status(200).json({
         success: true,
         statusCode: 200,
         message: 'Cart item updated successfully',
-        data: cartItem
+        data: updatedCartItem
       });
 
     } catch (error) {
+      console.error('❌ Update cart item error:', error);
       res.status(500).json({
         success: false,
         statusCode: 500,

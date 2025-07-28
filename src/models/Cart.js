@@ -17,6 +17,11 @@ const cartSchema = new mongoose.Schema({
     ref: 'Product', 
     default: null
   },
+   variant_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PetVariant',
+    default: null
+  },
   quantity: {
     type: Number,
     required: true,
@@ -31,59 +36,62 @@ const cartSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Validation middleware
+// Cập nhật validation middleware:
 cartSchema.pre('save', function(next) {
-  // Phải có ít nhất một trong pet_id hoặc product_id
-  if (!this.pet_id && !this.product_id) {
-    return next(new Error('Cart item must have either pet_id or product_id'));
+  // Phải có ít nhất một trong pet_id, product_id, hoặc variant_id
+  if (!this.pet_id && !this.product_id && !this.variant_id) {
+    return next(new Error('Cart item must have either pet_id, product_id, or variant_id'));
   }
   
-  // Không được có cả hai
-  if (this.pet_id && this.product_id) {
-    return next(new Error('Cart item cannot have both pet_id and product_id'));
+  // Chỉ được có một loại item
+  const itemTypes = [this.pet_id, this.product_id, this.variant_id].filter(Boolean);
+  if (itemTypes.length > 1) {
+    return next(new Error('Cart item can only have one of: pet_id, product_id, or variant_id'));
   }
   
   next();
 });
 
-// ✅ FIXED Static method để tìm cart item hiện có
-cartSchema.statics.findExistingItem = function(user_id, pet_id, product_id) {
-  console.log('🔍 Finding existing item:', { user_id, pet_id, product_id });
+// Cập nhật static method findExistingItem:
+cartSchema.statics.findExistingItem = function(user_id, pet_id, product_id, variant_id) {
+  console.log('🔍 Finding existing item:', { user_id, pet_id, product_id, variant_id });
   
   const query = { 
     user_id: new mongoose.Types.ObjectId(user_id) 
   };
   
-  if (pet_id && !product_id) {
-    // Tìm pet item
+  if (variant_id && !pet_id && !product_id) {
+    // Tìm variant item
+    query.variant_id = new mongoose.Types.ObjectId(variant_id);
+    query.pet_id = { $in: [null, undefined] };
+    query.product_id = { $in: [null, undefined] };
+  } else if (pet_id && !product_id && !variant_id) {
+    // Tìm pet item (legacy)  
     query.pet_id = new mongoose.Types.ObjectId(pet_id);
-    query.product_id = { $in: [null, undefined] }; // ✅ Handle both null and undefined
-  } else if (product_id && !pet_id) {
-    // Tìm product item  
+    query.product_id = { $in: [null, undefined] };
+    query.variant_id = { $in: [null, undefined] };
+  } else if (product_id && !pet_id && !variant_id) {
+    // Tìm product item
     query.product_id = new mongoose.Types.ObjectId(product_id);
-    query.pet_id = { $in: [null, undefined] }; // ✅ Handle both null and undefined
+    query.pet_id = { $in: [null, undefined] };
+    query.variant_id = { $in: [null, undefined] };
   } else {
-    // Invalid case
-    console.log('❌ Invalid findExistingItem call - need either pet_id or product_id');
+    console.log('❌ Invalid findExistingItem call');
     return Promise.resolve(null);
   }
   
-  console.log('🔍 Query:', JSON.stringify(query, null, 2));
-  
-  return this.findOne(query).then(result => {
-    console.log('🔍 Found existing item:', result ? result._id : 'None');
-    return result;
-  });
+  return this.findOne(query);
 };
 
-// Instance method để check item type
+// Cập nhật instance methods:
 cartSchema.methods.getItemType = function() {
-  return this.pet_id ? 'pet' : 'product';
+  if (this.variant_id) return 'variant';
+  if (this.pet_id) return 'pet';
+  return 'product';
 };
 
-// Instance method để get item ID
 cartSchema.methods.getItemId = function() {
-  return this.pet_id || this.product_id;
+  return this.variant_id || this.pet_id || this.product_id;
 };
 
 module.exports = mongoose.model('Cart', cartSchema);
