@@ -1,4 +1,3 @@
-// server.js - CẬP NHẬT VỚI SOCKET.IO
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -28,6 +27,7 @@ const appointmentRoutes = require('./src/routes/appointmentRoutes');
 const careServiceRoutes = require('./src/routes/careServiceRoutes');
 const petVariantRoutes = require('./src/routes/petVariantRoutes');
 const statisticsRoutes = require('./src/routes/statisticsRoutes');
+const pushNotificationRoutes = require('./src/routes/pushNotificationRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -83,6 +83,7 @@ app.use('/', vnpayRoutes);
 app.use('/api/favourites', favouriteRoutes);
 app.use('/api/pet-variants', petVariantRoutes); // 
 app.use('/api/statistics', statisticsRoutes); // Thống kê
+app.use('/api/push-notifications', pushNotificationRoutes); // Push notifications
 
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
