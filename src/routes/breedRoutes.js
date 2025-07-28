@@ -1,3 +1,4 @@
+// src/routes/breedRoutes.js - Enhanced version
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
@@ -5,20 +6,45 @@ const requireRoles = require('../middleware/requireRole');
 const {
   createBreed,
   getAllBreeds,
+  getBreedById,
   getBreedsByCategory,
   updateBreed,
-  deleteBreed
+  deleteBreed,
+  getBreedStatistics
 } = require('../controllers/breedController');
 
-// ai cung xem dc
-router.get('/', auth, getAllBreeds); 
-router.get('/category/:categoryId', auth, getBreedsByCategory); 
+// ===== PUBLIC ROUTES =====
+// Lấy tất cả breeds (public, cho user app)
+router.get('/public', getAllBreeds);
 
-// admin nhan vien
+// Lấy breeds theo category (public)
+router.get('/public/category/:categoryId', getBreedsByCategory);
+
+// Lấy breed theo ID (public)
+router.get('/public/:id', getBreedById);
+
+// ===== AUTHENTICATED ROUTES =====
+// Lấy tất cả breeds (authenticated users)
+// router.get('/', auth, getAllBreeds);
+router.get('/', getAllBreeds); 
+// Lấy breed theo ID (authenticated users)
+router.get('/:id', auth, getBreedById);
+
+// Lấy breeds theo category (authenticated users)
+router.get('/category/:categoryId', auth, getBreedsByCategory);
+
+// Lấy thống kê breeds (authenticated users)
+router.get('/admin/statistics', auth, getBreedStatistics);
+
+// ===== ADMIN/STAFF ROUTES =====
+// Tạo breed mới (Admin/Staff only)
 router.post('/', auth, requireRoles(['Admin', 'Staff']), createBreed);
+
+// Cập nhật breed (Admin/Staff only)
 router.put('/:id', auth, requireRoles(['Admin', 'Staff']), updateBreed);
 
-// chi admin dc xoa
+// ===== ADMIN ONLY ROUTES =====
+// Xóa breed (Admin only)
 router.delete('/:id', auth, requireRoles(['Admin']), deleteBreed);
 
 module.exports = router;
