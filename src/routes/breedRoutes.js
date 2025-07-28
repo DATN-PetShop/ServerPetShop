@@ -11,7 +11,6 @@ const {
   getBreedsByCategory,
   updateBreed,
   deleteBreed,
-  getBreedStatistics
 } = require('../controllers/breedController');
 
 // ===== PUBLIC ROUTES =====
@@ -34,16 +33,13 @@ router.get('/:id', auth, getBreedById);
 // Lấy breeds theo category (authenticated users)
 router.get('/category/:categoryId', auth, getBreedsByCategory);
 
-// Lấy thống kê breeds (authenticated users)
-router.get('/admin/statistics', auth, getBreedStatistics);
-
 // ===== ADMIN/STAFF ROUTES =====
 // Tạo breed mới (Admin/Staff only)
 router.post('/', auth, requireRoles(['Admin', 'Staff']), createBreed);
 
 // Cập nhật breed (Admin/Staff only)
 router.put('/:id', auth, requireRoles(['Admin', 'Staff']), updateBreed);
-=======
+
 // ai cung xem dc
 router.get('/', auth, getAllBreeds); 
 router.get('/:id', auth, getBreedById);
