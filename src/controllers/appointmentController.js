@@ -436,103 +436,6 @@ class AppointmentController {
     }
   }
 
-  // ADMIN: Lấy tất cả lịch hẹn
-  async getAllAppointments(req, res) {
-    try {
-      const { status, date, page = 1, limit = 10 } = req.query;
-
-      // Tạo filter
-      const filter = {};
-      if (status) {
-        filter.status = status;
-      }
-      if (date) {
-        filter.appointment_date = new Date(date);
-      }
-
-      // Pagination
-      const skip = (page - 1) * limit;
-      
-      const appointments = await Appointment.find(filter)
-        .populate('user_id', 'username email')
-        .populate('pet_id', 'name breed_id')
-        .populate('service_id', 'name price duration')
-        .populate('staff_id', 'username email')
-        .sort({ appointment_date: 1, appointment_time: 1 })
-        .skip(skip)
-        .limit(parseInt(limit));
-
-      const total = await Appointment.countDocuments(filter);
-
-      res.status(200).json({
-        success: true,
-        message: 'Lấy danh sách lịch hẹn thành công',
-        data: {
-          appointments,
-          pagination: {
-            currentPage: parseInt(page),
-            totalPages: Math.ceil(total / limit),
-            totalCount: total,
-            hasNextPage: page < Math.ceil(total / limit),
-            hasPrevPage: page > 1
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Get all appointments error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Lỗi server',
-        error: error.message
-      });
-    }
-  }
-
-  // ADMIN: Cập nhật trạng thái lịch hẹn
-  async updateAppointmentStatus(req, res) {
-    try {
-      const { id } = req.params;
-      const { status, staff_id } = req.body;
-
-      const appointment = await Appointment.findById(id);
-      if (!appointment) {
-        return res.status(404).json({
-          success: false,
-          message: 'Không tìm thấy lịch hẹn'
-        });
-      }
-
-      // Cập nhật trạng thái
-      if (status) {
-        appointment.status = status;
-      }
-      if (staff_id) {
-        appointment.staff_id = staff_id;
-      }
-
-      await appointment.save();
-
-      const updatedAppointment = await Appointment.findById(appointment._id)
-        .populate('user_id', 'username email')
-        .populate('pet_id', 'name breed_id')
-        .populate('service_id', 'name price duration')
-        .populate('staff_id', 'username email');
-
-      res.status(200).json({
-        success: true,
-        message: 'Cập nhật trạng thái thành công',
-        data: updatedAppointment
-      });
-    } catch (error) {
-      console.error('Update appointment status error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Lỗi server',
-        error: error.message
-      });
-    }
-  }
-
   // Lấy khung giờ trống
   async getAvailableSlots(req, res) {
     try {
@@ -584,7 +487,5 @@ module.exports = {
   getAppointmentById: appointmentController.getAppointmentById.bind(appointmentController),
   updateAppointment: appointmentController.updateAppointment.bind(appointmentController),
   cancelAppointment: appointmentController.cancelAppointment.bind(appointmentController),
-  getAllAppointments: appointmentController.getAllAppointments.bind(appointmentController),
-  updateAppointmentStatus: appointmentController.updateAppointmentStatus.bind(appointmentController),
   getAvailableSlots: appointmentController.getAvailableSlots.bind(appointmentController)
 };
