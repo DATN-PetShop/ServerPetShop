@@ -2334,7 +2334,7 @@ async create(req, res) {
     // Tạo pet object
     const petData = {
       ...req.body,
-      user_id: req.user.userId
+      // user_id: req.user.userId
     };
 
     // Tạo pet
