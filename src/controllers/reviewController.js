@@ -1,9 +1,12 @@
+// src/controllers/reviewController.js - Updated với Upload Images
 const Review = require('../models/Review');
+const ReviewImage = require('../models/ReviewImage');
 const BaseCrudController = require('./baseCrudController');
+const { cloudinary } = require('../config/cloudinaryConfig');
 
 class ReviewController extends BaseCrudController {
   constructor() {
-    super(Review);
+    super(Review, ReviewImage);
   }
 
   getRequiredFields() {
@@ -14,11 +17,16 @@ class ReviewController extends BaseCrudController {
     return 'Review';
   }
 
-  // Tạo đánh giá
+  getImageForeignKey() {
+    return 'review_id';
+  }
+
+  // Tạo đánh giá với ảnh
   async create(req, res) {
     try {
       console.log('REQ.BODY:', req.body);
       console.log('REQ.USER:', req.user);
+      console.log('REQ.FILES:', req.files);
 
       // Cấm Admin tạo đánh giá
       if (req.user && req.user.role === 'Admin') {
@@ -43,21 +51,40 @@ class ReviewController extends BaseCrudController {
         });
       }
 
+      // Tạo review data
       const reviewData = {
         ...body,
         user_id: req.user?.id || body.user_id
       };
 
+      // Tạo review
       const review = new this.model(reviewData);
-      await review.save();
+      const savedReview = await review.save();
 
-      console.log("REVIEW SAVED:", review);
+      // Xử lý upload ảnh nếu có
+      if (this.imageModel && req.files && req.files.length > 0) {
+        const imageDocs = req.files.map((file, index) => ({
+          url: file.path, // Cloudinary URL
+          is_primary: index === 0, // Ảnh đầu tiên là ảnh chính
+          [this.getImageForeignKey()]: savedReview._id
+        }));
+        
+        await this.imageModel.insertMany(imageDocs);
+        
+        // Gắn ảnh vào response
+        const images = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: savedReview._id 
+        }).lean();
+        savedReview.images = images;
+      }
+
+      console.log("REVIEW SAVED:", savedReview);
 
       res.status(201).json({
         success: true,
         statusCode: 201,
         message: 'Tạo đánh giá thành công',
-        data: review
+        data: savedReview
       });
     } catch (error) {
       console.error('Lỗi khi tạo đánh giá:', error);
@@ -70,7 +97,100 @@ class ReviewController extends BaseCrudController {
     }
   }
 
-  // Lấy tất cả đánh giá
+  // Cập nhật đánh giá với ảnh
+  async update(req, res) {
+    try {
+      console.log('REQ.BODY:', req.body);
+      console.log('REQ.FILES:', req.files);
+
+      // Kiểm tra quyền - chỉ user tạo review hoặc Admin mới được update
+      const existingReview = await this.model.findById(req.params.id);
+      if (!existingReview) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Không tìm thấy đánh giá',
+          data: null
+        });
+      }
+
+      // Kiểm tra quyền sở hữu (trừ Admin)
+      if (req.user.role !== 'Admin' && existingReview.user_id.toString() !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          statusCode: 403,
+          message: 'Bạn không có quyền chỉnh sửa đánh giá này',
+          data: null
+        });
+      }
+
+      // Cập nhật review
+      const updated = await this.model.findOneAndUpdate(
+        { _id: req.params.id },
+        req.body,
+        { new: true }
+      );
+
+      // Xử lý cập nhật ảnh nếu có
+      if (this.imageModel && req.files && req.files.length > 0) {
+        // Xóa ảnh cũ
+        const oldImages = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: updated._id 
+        });
+        
+        if (oldImages.length > 0) {
+          // Xóa từ Cloudinary
+          for (const image of oldImages) {
+            const publicId = image.url.split('/').pop().split('.')[0];
+            try {
+              await cloudinary.uploader.destroy(`e-commerce/${publicId}`);
+            } catch (cloudinaryError) {
+              console.log('Error deleting from cloudinary:', cloudinaryError);
+            }
+          }
+        }
+
+        // Xóa records ảnh cũ
+        await this.imageModel.deleteMany({ 
+          [this.getImageForeignKey()]: updated._id 
+        });
+
+        // Tạo records ảnh mới
+        const imageDocs = req.files.map((file, index) => ({
+          url: file.path, // Cloudinary URL
+          is_primary: index === 0, // Ảnh đầu tiên là ảnh chính
+          [this.getImageForeignKey()]: updated._id
+        }));
+        
+        await this.imageModel.insertMany(imageDocs);
+      }
+
+      // Gắn ảnh vào response
+      if (this.imageModel) {
+        const images = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: updated._id 
+        }).lean();
+        updated.images = images;
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Cập nhật đánh giá thành công',
+        data: updated
+      });
+    } catch (error) {
+      console.error('Lỗi khi cập nhật đánh giá:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi khi cập nhật đánh giá',
+        data: null
+      });
+    }
+  }
+
+  // Lấy tất cả đánh giá với ảnh
   async getAllReviews(req, res) {
     try {
       const reviews = await this.model.find()
@@ -78,6 +198,16 @@ class ReviewController extends BaseCrudController {
         .populate('user_id', 'username email')
         .populate('product_id', 'name price')
         .lean();
+
+      // Thêm ảnh cho mỗi review
+      if (this.imageModel) {
+        for (let review of reviews) {
+          const images = await this.imageModel.find({ 
+            [this.getImageForeignKey()]: review._id 
+          }).lean();
+          review.images = images;
+        }
+      }
 
       res.status(200).json({
         success: true,
@@ -96,10 +226,14 @@ class ReviewController extends BaseCrudController {
     }
   }
 
-  // Xóa đánh giá
-  async delete(req, res) {
+  // Lấy đánh giá theo ID với ảnh
+  async getById(req, res) {
     try {
-      const review = await this.model.findByIdAndDelete(req.params.id);
+      const review = await this.model.findById(req.params.id)
+        .populate('pet_id', 'name breed')
+        .populate('user_id', 'username email')
+        .populate('product_id', 'name price')
+        .lean();
 
       if (!review) {
         return res.status(404).json({
@@ -110,11 +244,124 @@ class ReviewController extends BaseCrudController {
         });
       }
 
+      // Gắn ảnh
+      if (this.imageModel) {
+        const images = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: review._id 
+        }).lean();
+        review.images = images;
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Lấy đánh giá thành công',
+        data: review
+      });
+    } catch (error) {
+      console.error('Lỗi khi lấy đánh giá theo ID:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi máy chủ nội bộ',
+        data: null
+      });
+    }
+  }
+
+  // Lấy đánh giá theo Pet ID
+  async getReviewsByPet(req, res) {
+    try {
+      const { petId } = req.params;
+      
+      const reviews = await this.model.find({ pet_id: petId })
+        .populate('user_id', 'username email')
+        .populate('product_id', 'name price')
+        .lean();
+
+      // Thêm ảnh cho mỗi review
+      if (this.imageModel) {
+        for (let review of reviews) {
+          const images = await this.imageModel.find({ 
+            [this.getImageForeignKey()]: review._id 
+          }).lean();
+          review.images = images;
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Lấy đánh giá theo pet thành công',
+        data: reviews
+      });
+    } catch (error) {
+      console.error('Lỗi khi lấy đánh giá theo pet:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi máy chủ nội bộ',
+        data: null
+      });
+    }
+  }
+
+  // Xóa đánh giá và ảnh liên quan
+  async delete(req, res) {
+    try {
+      const review = await this.model.findById(req.params.id);
+
+      if (!review) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Không tìm thấy đánh giá',
+          data: null
+        });
+      }
+
+      // Kiểm tra quyền - chỉ user tạo review hoặc Admin mới được xóa
+      if (req.user.role !== 'Admin' && review.user_id.toString() !== req.user.id) {
+        return res.status(403).json({
+          success: false,
+          statusCode: 403,
+          message: 'Bạn không có quyền xóa đánh giá này',
+          data: null
+        });
+      }
+
+      // Xóa ảnh liên quan
+      if (this.imageModel) {
+        const imagesToDelete = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: review._id 
+        });
+        
+        if (imagesToDelete.length > 0) {
+          // Xóa từ Cloudinary
+          for (const image of imagesToDelete) {
+            const publicId = image.url.split('/').pop().split('.')[0];
+            try {
+              await cloudinary.uploader.destroy(`e-commerce/${publicId}`);
+            } catch (cloudinaryError) {
+              console.log('Error deleting from cloudinary:', cloudinaryError);
+            }
+          }
+
+          // Xóa image records
+          await this.imageModel.deleteMany({ 
+            [this.getImageForeignKey()]: review._id 
+          });
+        }
+      }
+
+      // Xóa review
+      await this.model.findByIdAndDelete(req.params.id);
+
       res.status(200).json({
         success: true,
         statusCode: 200,
         message: 'Xóa đánh giá thành công',
-        data: review
+        data: null
       });
     } catch (error) {
       console.error('Lỗi khi xóa đánh giá:', error);
@@ -133,5 +380,8 @@ const reviewController = new ReviewController();
 module.exports = {
   createReview: reviewController.create.bind(reviewController),
   getAllReviews: reviewController.getAllReviews.bind(reviewController),
+  getReviewById: reviewController.getById.bind(reviewController),
+  getReviewsByPet: reviewController.getReviewsByPet.bind(reviewController),
+  updateReview: reviewController.update.bind(reviewController),
   deleteReview: reviewController.delete.bind(reviewController)
 };
