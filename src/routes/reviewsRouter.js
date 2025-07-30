@@ -1,4 +1,4 @@
-// src/routes/reviewRoutes.js - Updated với Upload Images
+// src/routes/reviewRoutes.js - Enhanced với các endpoint mới
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
@@ -9,8 +9,10 @@ const {
   getAllReviews,
   getReviewById,
   getReviewsByPet,
+  getMyReviews,
   updateReview,
-  deleteReview
+  deleteReview,
+  hideReviewsForRatedProduct
 } = require('../controllers/reviewController');
 
 // ===== PUBLIC ROUTES =====
@@ -20,7 +22,8 @@ router.get('/public', getAllReviews);
 // Lấy review theo ID (public)
 router.get('/public/:id', getReviewById);
 
-// Lấy reviews theo pet ID (public)
+// Lấy reviews theo pet ID với phân trang và sắp xếp (public)
+// Params: ?page=1&limit=10&sortBy=created_at&sortOrder=desc&rating=5
 router.get('/public/pet/:petId', getReviewsByPet);
 
 // ===== AUTHENTICATED ROUTES =====
@@ -30,8 +33,12 @@ router.get('/', auth, getAllReviews);
 // Lấy review theo ID (authenticated users)
 router.get('/:id', auth, getReviewById);
 
-// Lấy reviews theo pet ID (authenticated users)
+// Lấy reviews theo pet ID với phân trang và sắp xếp (authenticated users)
 router.get('/pet/:petId', auth, getReviewsByPet);
+
+// Lấy đánh giá của user hiện tại
+// Params: ?page=1&limit=10&sortBy=created_at&sortOrder=desc
+router.get('/my/reviews', auth, getMyReviews);
 
 // ===== USER ROUTES (Authenticated Users) =====
 // Tạo review mới với ảnh (User only - không cho Admin)
@@ -43,6 +50,7 @@ router.post('/',
 );
 
 // Cập nhật review với ảnh (User owner hoặc Admin)
+// CHỈ CHO PHÉP TRONG 7 NGÀY SAU KHI TẠO (trừ Admin)
 router.put('/:id', 
   auth, 
   upload.array('images', 3), 
@@ -59,6 +67,13 @@ router.get('/admin/all',
   auth, 
   requireRoles(['Admin']), 
   getAllReviews
+);
+
+// Ẩn tất cả đánh giá của một sản phẩm khi sản phẩm đã được đánh giá (Admin only)
+router.patch('/admin/hide/:petId', 
+  auth, 
+  requireRoles(['Admin']), 
+  hideReviewsForRatedProduct
 );
 
 module.exports = router;

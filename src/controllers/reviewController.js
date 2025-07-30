@@ -1,4 +1,4 @@
-// src/controllers/reviewController.js - Updated với Upload Images
+// src/controllers/reviewController.js - Enhanced với các chức năng mới
 const Review = require('../models/Review');
 const ReviewImage = require('../models/ReviewImage');
 const BaseCrudController = require('./baseCrudController');
@@ -97,7 +97,7 @@ class ReviewController extends BaseCrudController {
     }
   }
 
-  // Cập nhật đánh giá với ảnh
+  // Cập nhật đánh giá với ảnh - CHỈ CHO PHÉP TRONG 7 NGÀY
   async update(req, res) {
     try {
       console.log('REQ.BODY:', req.body);
@@ -122,6 +122,22 @@ class ReviewController extends BaseCrudController {
           message: 'Bạn không có quyền chỉnh sửa đánh giá này',
           data: null
         });
+      }
+
+      // KIỂM TRA THỜI GIAN CHỈNH SỬA (7 NGÀY) - CHỈ ÁP DỤNG CHO USER
+      if (req.user.role !== 'Admin') {
+        const createdAt = new Date(existingReview.created_at);
+        const now = new Date();
+        const daysDifference = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+        
+        if (daysDifference > 7) {
+          return res.status(403).json({
+            success: false,
+            statusCode: 403,
+            message: 'Bạn chỉ có thể chỉnh sửa đánh giá trong vòng 7 ngày sau khi tạo',
+            data: null
+          });
+        }
       }
 
       // Cập nhật review
@@ -197,6 +213,7 @@ class ReviewController extends BaseCrudController {
         .populate('pet_id', 'name breed')
         .populate('user_id', 'username email')
         .populate('product_id', 'name price')
+        .sort({ created_at: -1 }) // Sắp xếp theo thời gian mới nhất
         .lean();
 
       // Thêm ảnh cho mỗi review
@@ -206,6 +223,12 @@ class ReviewController extends BaseCrudController {
             [this.getImageForeignKey()]: review._id 
           }).lean();
           review.images = images;
+          
+          // Thêm thông tin thời gian để kiểm tra có thể chỉnh sửa không
+          const createdAt = new Date(review.created_at);
+          const now = new Date();
+          const daysDifference = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+          review.canEdit = daysDifference <= 7;
         }
       }
 
@@ -220,7 +243,7 @@ class ReviewController extends BaseCrudController {
       res.status(500).json({
         success: false,
         statusCode: 500,
-        message: 'Lỗi máy chủ nội bộ',
+        message: 'Lỗi máy chứa nội bộ',
         data: null
       });
     }
@@ -250,6 +273,12 @@ class ReviewController extends BaseCrudController {
           [this.getImageForeignKey()]: review._id 
         }).lean();
         review.images = images;
+        
+        // Thêm thông tin thời gian để kiểm tra có thể chỉnh sửa không
+        const createdAt = new Date(review.created_at);
+        const now = new Date();
+        const daysDifference = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+        review.canEdit = daysDifference <= 7;
       }
 
       res.status(200).json({
@@ -269,15 +298,40 @@ class ReviewController extends BaseCrudController {
     }
   }
 
-  // Lấy đánh giá theo Pet ID
+  // Lấy đánh giá theo Pet ID với sắp xếp và phân trang
   async getReviewsByPet(req, res) {
     try {
       const { petId } = req.params;
+      const { 
+        page = 1, 
+        limit = 10, 
+        sortBy = 'created_at', 
+        sortOrder = 'desc',
+        rating // Filter theo rating
+      } = req.query;
+
+      // Build query
+      let query = { pet_id: petId };
+      if (rating) {
+        query.rating = parseInt(rating);
+      }
+
+      // Build sort object
+      const sortObj = {};
+      sortObj[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+      const skip = (parseInt(page) - 1) * parseInt(limit);
       
-      const reviews = await this.model.find({ pet_id: petId })
-        .populate('user_id', 'username email')
+      const reviews = await this.model.find(query)
+        .populate('user_id', 'username email avatar_url')
         .populate('product_id', 'name price')
+        .sort(sortObj)
+        .skip(skip)
+        .limit(parseInt(limit))
         .lean();
+
+      // Tổng số reviews
+      const total = await this.model.countDocuments(query);
 
       // Thêm ảnh cho mỗi review
       if (this.imageModel) {
@@ -286,17 +340,167 @@ class ReviewController extends BaseCrudController {
             [this.getImageForeignKey()]: review._id 
           }).lean();
           review.images = images;
+          
+          // Thêm thông tin thời gian để kiểm tra có thể chỉnh sửa không
+          const createdAt = new Date(review.created_at);
+          const now = new Date();
+          const daysDifference = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+          review.canEdit = daysDifference <= 7;
         }
+      }
+
+      // Tính thống kê rating
+      const ratingStats = await this.model.aggregate([
+        { $match: { pet_id: petId } },
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: '$rating' },
+            totalReviews: { $sum: 1 },
+            ratingDistribution: {
+              $push: '$rating'
+            }
+          }
+        }
+      ]);
+
+      // Tính phân bố rating
+      let ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      if (ratingStats.length > 0) {
+        ratingStats[0].ratingDistribution.forEach(rating => {
+          ratingDistribution[rating]++;
+        });
       }
 
       res.status(200).json({
         success: true,
         statusCode: 200,
         message: 'Lấy đánh giá theo pet thành công',
-        data: reviews
+        data: {
+          reviews,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(total / parseInt(limit)),
+            totalCount: total,
+            hasNextPage: page < Math.ceil(total / parseInt(limit)),
+            hasPrevPage: page > 1,
+            limit: parseInt(limit)
+          },
+          stats: {
+            averageRating: ratingStats.length > 0 ? ratingStats[0].averageRating : 0,
+            totalReviews: ratingStats.length > 0 ? ratingStats[0].totalReviews : 0,
+            ratingDistribution
+          }
+        }
       });
     } catch (error) {
       console.error('Lỗi khi lấy đánh giá theo pet:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi máy chủ nội bộ',
+        data: null
+      });
+    }
+  }
+
+  // Lấy đánh giá của user hiện tại
+  async getMyReviews(req, res) {
+    try {
+      const { 
+        page = 1, 
+        limit = 10, 
+        sortBy = 'created_at', 
+        sortOrder = 'desc' 
+      } = req.query;
+
+      const sortObj = {};
+      sortObj[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      
+      const reviews = await this.model.find({ user_id: req.user.id })
+        .populate('pet_id', 'name breed images')
+        .populate('product_id', 'name price images')
+        .sort(sortObj)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean();
+
+      const total = await this.model.countDocuments({ user_id: req.user.id });
+
+      // Thêm ảnh cho mỗi review
+      if (this.imageModel) {
+        for (let review of reviews) {
+          const images = await this.imageModel.find({ 
+            [this.getImageForeignKey()]: review._id 
+          }).lean();
+          review.images = images;
+          
+          // Thêm thông tin thời gian để kiểm tra có thể chỉnh sửa không
+          const createdAt = new Date(review.created_at);
+          const now = new Date();
+          const daysDifference = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+          review.canEdit = daysDifference <= 7;
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Lấy đánh giá của tôi thành công',
+        data: {
+          reviews,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(total / parseInt(limit)),
+            totalCount: total,
+            hasNextPage: page < Math.ceil(total / parseInt(limit)),
+            hasPrevPage: page > 1,
+            limit: parseInt(limit)
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Lỗi khi lấy đánh giá của tôi:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi máy chủ nội bộ',
+        data: null
+      });
+    }
+  }
+
+  // Ẩn đánh giá khi sản phẩm đã được đánh giá (Admin only)
+  async hideReviewsForRatedProduct(req, res) {
+    try {
+      const { petId } = req.params;
+      
+      // Chỉ Admin mới có quyền ẩn đánh giá
+      if (req.user.role !== 'Admin') {
+        return res.status(403).json({
+          success: false,
+          statusCode: 403,
+          message: 'Chỉ Admin mới có quyền thực hiện chức năng này',
+          data: null
+        });
+      }
+
+      // Cập nhật tất cả reviews của pet này thành hidden
+      const result = await this.model.updateMany(
+        { pet_id: petId },
+        { $set: { is_hidden: true } }
+      );
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: `Đã ẩn ${result.modifiedCount} đánh giá cho sản phẩm này`,
+        data: { modifiedCount: result.modifiedCount }
+      });
+    } catch (error) {
+      console.error('Lỗi khi ẩn đánh giá:', error);
       res.status(500).json({
         success: false,
         statusCode: 500,
@@ -382,6 +586,8 @@ module.exports = {
   getAllReviews: reviewController.getAllReviews.bind(reviewController),
   getReviewById: reviewController.getById.bind(reviewController),
   getReviewsByPet: reviewController.getReviewsByPet.bind(reviewController),
+  getMyReviews: reviewController.getMyReviews.bind(reviewController),
   updateReview: reviewController.update.bind(reviewController),
-  deleteReview: reviewController.delete.bind(reviewController)
+  deleteReview: reviewController.delete.bind(reviewController),
+  hideReviewsForRatedProduct: reviewController.hideReviewsForRatedProduct.bind(reviewController)
 };
