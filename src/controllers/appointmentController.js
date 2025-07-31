@@ -260,6 +260,8 @@ class AppointmentController {
         .populate('pet_id', 'name breed_id')
         .populate('service_id', 'name price duration category')
         .populate('staff_id', 'username email')
+        .populate('user_id', 'username email')
+        .populate('order_id', 'total_amount order_date status')
         .sort({ appointment_date: -1, appointment_time: -1 })
         .skip(skip)
         .limit(parseInt(limit));
@@ -390,51 +392,7 @@ class AppointmentController {
     }
   }
 
-  // Hủy lịch hẹn
-  async cancelAppointment(req, res) {
-    try {
-      const user_id = req.user?.userId;
-      if (!user_id) {
-        return res.status(401).json({
-          success: false,
-          message: 'Không xác thực được người dùng'
-        });
-      }
-      const { id } = req.params;
 
-      const appointment = await Appointment.findOne({ _id: id, user_id });
-      if (!appointment) {
-        return res.status(404).json({
-          success: false,
-          message: 'Không tìm thấy lịch hẹn'
-        });
-      }
-
-      // Chỉ cho phép hủy khi status là pending hoặc confirmed
-      if (!['pending', 'confirmed'].includes(appointment.status)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Không thể hủy lịch hẹn này'
-        });
-      }
-
-      appointment.status = 'cancelled';
-      await appointment.save();
-
-      res.status(200).json({
-        success: true,
-        message: 'Hủy lịch hẹn thành công',
-        data: appointment
-      });
-    } catch (error) {
-      console.error('Cancel appointment error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Lỗi server',
-        error: error.message
-      });
-    }
-  }
 
   // Lấy khung giờ trống
   async getAvailableSlots(req, res) {
@@ -477,8 +435,153 @@ class AppointmentController {
       });
     }
   }
-}
 
+  async cancelAppointment(req, res) {
+    try {
+      const user_id = req.user?.userId;
+      if (!user_id) {
+        return res.status(401).json({
+          success: false,
+          message: 'Không xác thực được người dùng'
+        });
+      }
+      const { id } = req.params;
+
+      console.log('🔍 Cancelling appointment:', { id, user_id });
+
+      // Tìm lịch hẹn và populate thông tin cần thiết để log
+      const appointment = await Appointment.findOne({ _id: id, user_id })
+        .populate('pet_id', 'name')
+        .populate('service_id', 'name');
+        
+      if (!appointment) {
+        console.log('❌ Appointment not found:', { id, user_id });
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy lịch hẹn hoặc lịch hẹn không thuộc về bạn'
+        });
+      }
+
+      console.log('📋 Current appointment details:', {
+        id: appointment._id,
+        status: appointment.status,
+        pet: appointment.pet_id?.name,
+        service: appointment.service_id?.name,
+        date: appointment.appointment_date,
+        time: appointment.appointment_time
+      });
+
+      // ❌ CHÍNH SÁCH HỦY LỊCH: Chỉ cho phép hủy khi status là 'pending'
+      if (appointment.status !== 'pending') {
+        console.log('❌ Cannot cancel appointment with status:', appointment.status);
+        return res.status(400).json({
+          success: false,
+          message: getStatusCancelMessage(appointment.status),
+          data: {
+            currentStatus: appointment.status,
+            statusText: getStatusText(appointment.status),
+            canCancel: false
+          }
+        });
+      }
+
+      // ⏰ Kiểm tra thời gian: Không được hủy lịch hẹn trong quá khứ
+      const appointmentDateTime = new Date(`${appointment.appointment_date.toISOString().split('T')[0]}T${appointment.appointment_time}`);
+      const now = new Date();
+      
+      if (appointmentDateTime <= now) {
+        console.log('❌ Cannot cancel past appointment:', { appointmentDateTime, now });
+        return res.status(400).json({
+          success: false,
+          message: 'Không thể hủy lịch hẹn đã qua thời gian đặt lịch'
+        });
+      }
+
+      // ⏰ TÙYI CHỌN: Kiểm tra thời gian hủy trước (ví dụ: phải hủy trước 2 giờ)
+      const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      if (appointmentDateTime <= twoHoursFromNow) {
+        console.log('⚠️ Late cancellation warning:', { appointmentDateTime, twoHoursFromNow });
+        // Có thể thêm cảnh báo nhưng vẫn cho phép hủy
+        // hoặc có thể từ chối hủy tùy theo chính sách
+        console.log('⚠️ Allowing late cancellation (less than 2 hours notice)');
+      }
+
+      // ✅ Thực hiện hủy lịch hẹn
+      const oldStatus = appointment.status;
+      appointment.status = 'cancelled';
+      appointment.updated_at = new Date();
+      
+      await appointment.save();
+
+      console.log('✅ Appointment cancelled successfully:', {
+        id: appointment._id,
+        oldStatus,
+        newStatus: appointment.status,
+        pet: appointment.pet_id?.name,
+        service: appointment.service_id?.name
+      });
+
+      // Populate thông tin đầy đủ để trả về client
+      const cancelledAppointment = await Appointment.findById(appointment._id)
+        .populate('pet_id', 'name breed_id images')
+        .populate('service_id', 'name price duration description')
+        .populate('user_id', 'username email')
+        .populate('order_id', 'total_amount order_date status');
+
+      res.status(200).json({
+        success: true,
+        message: 'Hủy lịch hẹn thành công',
+        data: cancelledAppointment
+      });
+
+    } catch (error) {
+      console.error('❌ Cancel appointment error:', {
+        message: error.message,
+        stack: error.stack,
+        appointmentId: req.params.id,
+        userId: req.user?.userId
+      });
+
+      res.status(500).json({
+        success: false,
+        message: 'Lỗi server khi hủy lịch hẹn',
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      });
+    }
+  }
+}
+const getStatusCancelMessage = (status) => {
+  switch (status) {
+    case 'confirmed':
+      return 'Không thể hủy lịch hẹn đã được xác nhận. Vui lòng liên hệ với phòng khám để được hỗ trợ.';
+    case 'in_progress':
+      return 'Không thể hủy lịch hẹn đang được thực hiện.';
+    case 'completed':
+      return 'Không thể hủy lịch hẹn đã hoàn thành.';
+    case 'cancelled':
+      return 'Lịch hẹn đã được hủy trước đó.';
+    default:
+      return 'Không thể hủy lịch hẹn ở trạng thái hiện tại.';
+  }
+};
+
+// Helper function để chuyển đổi status thành text
+const getStatusText = (status) => {
+  switch (status) {
+    case 'pending':
+      return 'Chờ xác nhận';
+    case 'confirmed':
+      return 'Đã xác nhận';
+    case 'in_progress':
+      return 'Đang thực hiện';
+    case 'completed':
+      return 'Hoàn thành';
+    case 'cancelled':
+      return 'Đã hủy';
+    default:
+      return status;
+  }
+};
 const appointmentController = new AppointmentController();
 
 module.exports = {
