@@ -1,9 +1,10 @@
-// src/controllers/appointmentController.js - CẬP NHẬT HỖ TRỢ VARIANT với FALLBACK
+// src/controllers/appointmentController.js - CẬP NHẬT HỖ TRỢ VARIANT với FALLBACK và POPULATE IMAGES
 const Appointment = require('../models/Appointment');
 const CareService = require('../models/CareService');
 const Pet = require('../models/Pet');
 const Order = require('../models/Order');
 const OrderItem = require('../models/OrderItem');
+const Image = require('../models/ImagePet'); // ✅ THÊM IMPORT CHO IMAGES
 
 class AppointmentController {
   // Tạo lịch hẹn mới
@@ -213,11 +214,22 @@ class AppointmentController {
       await appointment.save();
       console.log('createAppointment - Appointment saved:', appointment._id);
 
-      // Populate thông tin để trả về
+      // Populate thông tin để trả về (bao gồm images)
       const populatedAppointment = await Appointment.findById(appointment._id)
-        .populate('pet_id', 'name breed_id')
+        .populate('pet_id', 'name breed_id type age weight gender')
         .populate('service_id', 'name price duration')
-        .populate('user_id', 'username email');
+        .populate('user_id', 'username email')
+        .lean();
+
+      // ✅ POPULATE IMAGES CHO PET
+      if (populatedAppointment.pet_id && populatedAppointment.pet_id._id) {
+        const petImages = await Image.find({ 
+          pet_id: populatedAppointment.pet_id._id 
+        }).lean();
+        populatedAppointment.pet_id.images = petImages;
+        console.log(`✅ Populated ${petImages.length} images for created appointment`);
+      }
+
       console.log('createAppointment - Populated appointment:', populatedAppointment);
 
       res.status(201).json({
@@ -235,7 +247,7 @@ class AppointmentController {
     }
   }
 
-  // Lấy danh sách lịch hẹn của user
+  // ✅ UPDATED: Lấy danh sách lịch hẹn của user với IMAGES
   async getUserAppointments(req, res) {
     try {
       const user_id = req.user?.userId;
@@ -257,14 +269,31 @@ class AppointmentController {
       const skip = (page - 1) * limit;
       
       const appointments = await Appointment.find(filter)
-        .populate('pet_id', 'name breed_id')
+        .populate('pet_id', 'name breed_id type age weight gender')
         .populate('service_id', 'name price duration category')
         .populate('staff_id', 'username email')
         .populate('user_id', 'username email')
         .populate('order_id', 'total_amount order_date status')
         .sort({ appointment_date: -1, appointment_time: -1 })
         .skip(skip)
-        .limit(parseInt(limit));
+        .limit(parseInt(limit))
+        .lean(); // ✅ Sử dụng .lean() để có thể modify object
+
+      // ✅ POPULATE IMAGES CHO MỖI PET
+      if (appointments && appointments.length > 0) {
+        for (let appointment of appointments) {
+          if (appointment.pet_id && appointment.pet_id._id) {
+            // Populate pet images
+            const petImages = await Image.find({ 
+              pet_id: appointment.pet_id._id 
+            }).lean();
+            
+            appointment.pet_id.images = petImages;
+            
+            console.log(`✅ Populated ${petImages.length} images for pet ${appointment.pet_id._id} in appointment ${appointment._id}`);
+          }
+        }
+      }
 
       const total = await Appointment.countDocuments(filter);
 
@@ -292,7 +321,7 @@ class AppointmentController {
     }
   }
 
-  // Lấy chi tiết lịch hẹn
+  // ✅ UPDATED: Lấy chi tiết lịch hẹn với IMAGES
   async getAppointmentById(req, res) {
     try {
       const user_id = req.user?.userId;
@@ -305,15 +334,27 @@ class AppointmentController {
       const { id } = req.params;
 
       const appointment = await Appointment.findOne({ _id: id, user_id })
-        .populate('pet_id', 'name breed_id age weight gender')
+        .populate('pet_id', 'name breed_id age weight gender type')
         .populate('service_id', 'name description price duration category')
-        .populate('staff_id', 'username email');
+        .populate('staff_id', 'username email')
+        .lean(); // ✅ Sử dụng .lean() để có thể modify object
 
       if (!appointment) {
         return res.status(404).json({
           success: false,
           message: 'Không tìm thấy lịch hẹn'
         });
+      }
+
+      // ✅ POPULATE IMAGES CHO PET
+      if (appointment.pet_id && appointment.pet_id._id) {
+        const petImages = await Image.find({ 
+          pet_id: appointment.pet_id._id 
+        }).lean();
+        
+        appointment.pet_id.images = petImages;
+        
+        console.log(`✅ Populated ${petImages.length} images for pet ${appointment.pet_id._id} in appointment detail`);
       }
 
       res.status(200).json({
@@ -374,8 +415,17 @@ class AppointmentController {
       await appointment.save();
 
       const updatedAppointment = await Appointment.findById(appointment._id)
-        .populate('pet_id', 'name breed_id')
-        .populate('service_id', 'name price duration');
+        .populate('pet_id', 'name breed_id type age weight gender')
+        .populate('service_id', 'name price duration')
+        .lean();
+
+      // ✅ POPULATE IMAGES CHO PET TRONG UPDATE
+      if (updatedAppointment.pet_id && updatedAppointment.pet_id._id) {
+        const petImages = await Image.find({ 
+          pet_id: updatedAppointment.pet_id._id 
+        }).lean();
+        updatedAppointment.pet_id.images = petImages;
+      }
 
       res.status(200).json({
         success: true,
