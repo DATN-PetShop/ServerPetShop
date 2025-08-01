@@ -19,84 +19,58 @@ const chatMessageSchema = new mongoose.Schema({
   },
   message_type: {
     type: String,
-    enum: ['text', 'image', 'file', 'system'],
+    enum: ['text', 'image'],
     default: 'text'
   },
-  is_read: {
-    type: Boolean,
-    default: false
+  image_url: {
+    type: String,
+    trim: true
   },
-  read_by: [{
-    user_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    read_at: {
-      type: Date,
-      default: Date.now
-    }
-  }],
-  // Metadata cho file/image messages
-  file_info: {
-    original_name: String,
-    file_size: Number,
-    mime_type: String,
-    file_url: String
+  sender_role: {
+    type: String,
+    enum: ['User', 'Staff', 'Admin'],
+    required: true
   },
   created_at: {
     type: Date,
     default: Date.now
-  },
-  updated_at: {
-    type: Date,
-    default: Date.now
   }
 });
 
-// Middleware để tự động cập nhật updated_at
 chatMessageSchema.pre('save', function(next) {
-  this.updated_at = Date.now();
+  if (this.message_type === 'image' && !this.image_url) {
+    return next(new Error('image_url is required for image messages'));
+  }
+  
+  // Nếu là text message thì không cần image_url
+  if (this.message_type === 'text' && this.image_url) {
+    this.image_url = undefined;
+  }
+  
   next();
 });
 
-// Indexes để tối ưu performance
 chatMessageSchema.index({ room_id: 1, created_at: -1 }); // Quan trọng nhất
 chatMessageSchema.index({ sender_id: 1 });
-chatMessageSchema.index({ is_read: 1 });
-chatMessageSchema.index({ created_at: -1 });
 
-// Virtual để check xem message có phải của user không
-chatMessageSchema.virtual('isFromUser').get(function() {
-  return this.message_type !== 'system';
-});
-
-// Method để đánh dấu đã đọc
-chatMessageSchema.methods.markAsReadBy = function(userId) {
-  // Kiểm tra xem user đã đọc chưa
-  const alreadyRead = this.read_by.some(
-    readRecord => readRecord.user_id.toString() === userId
-  );
-  
-  if (!alreadyRead) {
-    this.read_by.push({
-      user_id: userId,
-      read_at: new Date()
-    });
-    
-    // Nếu tất cả participants đã đọc thì đánh dấu is_read = true
-    // [Suy luận] - Logic này có thể cần điều chỉnh tùy business logic
-    this.is_read = true;
-  }
-  
-  return this.save();
+chatMessageSchema.statics.createTextMessage = function(roomId, senderId, content, senderRole) {
+  return new this({
+    room_id: roomId,
+    sender_id: senderId,
+    content: content,
+    message_type: 'text',
+    sender_role: senderRole
+  });
 };
 
-// Static method để đếm tin nhắn chưa đọc trong room
-chatMessageSchema.statics.countUnreadInRoom = function(roomId, userId) {
-  return this.countDocuments({
+chatMessageSchema.statics.createImageMessage = function(roomId, senderId, imageUrl, caption, senderRole) {
+  return new this({
     room_id: roomId,
-    sender_id: { $ne: userId }, // Không đếm tin nhắn của chính mình
-    'read_by.user_id': { $ne: userId } // Chưa đọc bởi user này
+    sender_id: senderId,
+    content: caption || 'Đã gửi một hình ảnh',
+    message_type: 'image',
+    image_url: imageUrl,
+    sender_role: senderRole
   });
 };
 
@@ -104,7 +78,16 @@ chatMessageSchema.statics.countUnreadInRoom = function(roomId, userId) {
 chatMessageSchema.statics.getLastMessageInRoom = function(roomId) {
   return this.findOne({ room_id: roomId })
     .sort({ created_at: -1 })
-    .populate('sender_id', 'username role');
+    .populate('sender_id', 'username role avatar_url');
+};
+
+chatMessageSchema.statics.getChatHistory = function(roomId, page = 1, limit = 50) {
+  const skip = (page - 1) * limit;
+  return this.find({ room_id: roomId })
+    .populate('sender_id', 'username role avatar_url')
+    .sort({ created_at: 1 }) // Cũ nhất lên đầu cho lịch sử
+    .skip(skip)
+    .limit(limit);
 };
 
 module.exports = mongoose.model('ChatMessage', chatMessageSchema);

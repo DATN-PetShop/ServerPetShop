@@ -2,172 +2,39 @@
 const ChatRoom = require('../models/ChatRoom');
 const ChatMessage = require('../models/ChatMessage');
 const User = require('../models/User');
-const BaseCrudController = require('./baseCrudController');
 
-class ChatController extends BaseCrudController {
-  constructor() {
-    super(ChatRoom); // ChatRoom làm model chính
-  }
-
-  getRequiredFields() {
-    return ['customer_id']; // Chỉ cần customer_id, các field khác có default
-  }
-
-  getEntityName() {
-    return 'ChatRoom';
-  }
-
-  // Override create để xử lý logic đặc biệt cho chat room
-  async createChatRoom(req, res) {
+class ChatController {
+  // 1. Bắt đầu chat cho customer
+  async startChat(req, res) {
     try {
-      const { subject, priority = 'medium' } = req.body;
-      const customer_id = req.user.userId; // Từ auth middleware
-      const userRole = req.userData.role; // Từ auth middleware
+      const customer_id = req.user.userId;
+      const userRole = req.userData.role;
 
-      // Chỉ User (customer) mới có thể tạo room
+      // Chỉ customer mới có thể bắt đầu chat
       if (userRole !== 'User') {
         return res.status(403).json({
           success: false,
           statusCode: 403,
-          message: 'Only customers can create chat rooms',
+          message: 'Only customers can start chat',
           data: null
         });
       }
 
-      // Kiểm tra xem customer đã có room active chưa
-      const existingRoom = await ChatRoom.findActiveRoomByCustomer(customer_id);
-      
-      if (existingRoom) {
-        // Trả về room hiện có thay vì tạo mới
-        return res.status(200).json({
-          success: true,
-          statusCode: 200,
-          message: 'Active chat room found',
-          data: existingRoom
-        });
-      }
+      // Tìm hoặc tạo room cho customer
+      const room = await ChatRoom.findOrCreateRoom(customer_id);
 
-      // Tạo room mới
-      const newRoom = new ChatRoom({
-        customer_id: customer_id,
-        subject: subject || 'Customer Support',
-        priority: priority,
-        status: 'waiting'
-      });
-
-      const savedRoom = await newRoom.save();
-
-      // Populate customer info cho response
-      await savedRoom.populate('customer_id', 'username email avatar_url');
-
-      res.status(201).json({
-        success: true,
-        statusCode: 201,
-        message: 'Chat room created successfully',
-        data: savedRoom
-      });
-
-    } catch (error) {
-      console.error('Create chat room error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null,
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    }
-  }
-
-  // Lấy danh sách chat rooms (cho customer và staff)
-  async getChatRooms(req, res) {
-    try {
-      const { status, page = 1, limit = 10 } = req.query;
-      const userRole = req.userData.role;
-      const userId = req.user.userId;
-
-      let filter = {};
-      let sortOrder = { last_message_at: -1 }; // Mặc định sort theo tin nhắn cuối
-
-      // Logic phân quyền
-      if (userRole === 'User') {
-        // Customer chỉ thấy rooms của mình
-        filter.customer_id = userId;
-      } else if (['Staff', 'Admin'].includes(userRole)) {
-        // Staff/Admin logic
-        if (status === 'pending') {
-          // Chỉ lấy rooms chờ assign
-          filter.status = 'waiting';
-          sortOrder = { created_at: 1 }; // Room cũ nhất lên đầu
-        } else if (status === 'assigned') {
-          // Chỉ lấy rooms đã assign cho staff này
-          filter.assigned_staff_id = userId;
-        } else {
-          // Lấy tất cả rooms staff có thể thấy
-          filter.$or = [
-            { assigned_staff_id: userId }, // Rooms đã assign
-            { status: 'waiting' } // Rooms chờ assign
-          ];
-        }
-      } else {
-        return res.status(403).json({
-          success: false,
-          statusCode: 403,
-          message: 'Access denied',
-          data: null
-        });
-      }
-
-      // Thêm filter theo status nếu có
-      if (status && status !== 'pending' && status !== 'assigned') {
-        filter.status = status;
-      }
-
-      // Pagination
-      const skip = (Number(page) - 1) * Number(limit);
-
-      // Execute query với populate
-      const rooms = await ChatRoom.find(filter)
-        .populate('customer_id', 'username email avatar_url')
-        .populate('assigned_staff_id', 'username email')
-        .sort(sortOrder)
-        .skip(skip)
-        .limit(Number(limit))
-        .lean();
-
-      // Đếm tổng số records
-      const totalCount = await ChatRoom.countDocuments(filter);
-
-      // Lấy tin nhắn cuối cùng cho mỗi room
-      const roomsWithLastMessage = await Promise.all(
-        rooms.map(async (room) => {
-          const lastMessage = await ChatMessage.getLastMessageInRoom(room._id);
-          return {
-            ...room,
-            last_message: lastMessage
-          };
-        })
-      );
+      // Populate customer info
+      await room.populate('customer_id', 'username email avatar_url');
 
       res.status(200).json({
         success: true,
         statusCode: 200,
-        message: 'Chat rooms retrieved successfully',
-        data: {
-          rooms: roomsWithLastMessage,
-          pagination: {
-            currentPage: Number(page),
-            totalPages: Math.ceil(totalCount / Number(limit)),
-            totalCount,
-            hasNextPage: Number(page) < Math.ceil(totalCount / Number(limit)),
-            hasPrevPage: Number(page) > 1,
-            limit: Number(limit)
-          }
-        }
+        message: 'Chat started successfully',
+        data: room
       });
 
     } catch (error) {
-      console.error('Get chat rooms error:', error);
+      console.error('Start chat error:', error);
       res.status(500).json({
         success: false,
         statusCode: 500,
@@ -178,7 +45,7 @@ class ChatController extends BaseCrudController {
     }
   }
 
-  // Lấy lịch sử chat của một room
+  // 2. Lấy lịch sử chat
   async getChatHistory(req, res) {
     try {
       const { roomId } = req.params;
@@ -197,7 +64,7 @@ class ChatController extends BaseCrudController {
         });
       }
 
-      // Kiểm tra quyền truy cập room
+      // Kiểm tra quyền truy cập đơn giản
       const hasAccess = room.hasAccess(userId, userRole);
       if (!hasAccess) {
         return res.status(403).json({
@@ -208,28 +75,14 @@ class ChatController extends BaseCrudController {
         });
       }
 
-      // Pagination
-      const skip = (Number(page) - 1) * Number(limit);
-
-      // Lấy messages với populate sender info
-      const messages = await ChatMessage.find({ room_id: roomId })
-        .populate('sender_id', 'username avatar_url role')
-        .sort({ created_at: -1 }) // Mới nhất lên đầu
-        .skip(skip)
-        .limit(Number(limit))
-        .lean();
+      // Lấy messages với pagination
+      const messages = await ChatMessage.getChatHistory(roomId, page, limit);
 
       // Đếm tổng số messages
       const totalCount = await ChatMessage.countDocuments({ room_id: roomId });
 
-      // Đếm tin nhắn chưa đọc của user này
-      const unreadCount = await ChatMessage.countUnreadInRoom(roomId, userId);
-
       // Populate room info
-      await room.populate([
-        { path: 'customer_id', select: 'username email avatar_url' },
-        { path: 'assigned_staff_id', select: 'username email' }
-      ]);
+      await room.populate('customer_id', 'username email avatar_url');
 
       res.status(200).json({
         success: true,
@@ -237,8 +90,7 @@ class ChatController extends BaseCrudController {
         message: 'Chat history retrieved successfully',
         data: {
           room: room,
-          messages: messages.reverse(), // Reverse để hiển thị từ cũ đến mới
-          unread_count: unreadCount,
+          messages: messages,
           pagination: {
             currentPage: Number(page),
             totalPages: Math.ceil(totalCount / Number(limit)),
@@ -262,14 +114,13 @@ class ChatController extends BaseCrudController {
     }
   }
 
-  // Staff assign room cho bản thân
-  async assignRoom(req, res) {
+  // 3. Lấy danh sách rooms cho staff
+  async getRooms(req, res) {
     try {
-      const { roomId } = req.params;
-      const userId = req.user.userId;
+      const { page = 1, limit = 10 } = req.query;
       const userRole = req.userData.role;
 
-      // Chỉ Staff/Admin mới assign được
+      // Chỉ staff/admin mới xem được danh sách rooms
       if (!['Staff', 'Admin'].includes(userRole)) {
         return res.status(403).json({
           success: false,
@@ -279,242 +130,42 @@ class ChatController extends BaseCrudController {
         });
       }
 
-      // Tìm room
-      const room = await ChatRoom.findById(roomId);
-      if (!room) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Chat room not found',
-          data: null
-        });
-      }
+      // Lấy rooms với pagination
+      const rooms = await ChatRoom.getRoomsForStaff(page, limit);
 
-      // Kiểm tra room có đang chờ hoặc chưa assign không
-      if (room.assigned_staff_id && room.assigned_staff_id.toString() !== userId) {
-        return res.status(400).json({
-          success: false,
-          statusCode: 400,
-          message: 'Room is already assigned to another staff member',
-          data: null
-        });
-      }
+      // Đếm tổng số rooms
+      const totalCount = await ChatRoom.countDocuments({ status: 'open' });
 
-      // Assign room
-      room.assigned_staff_id = userId;
-      room.status = 'active';
-      room.updated_at = new Date();
-      
-      await room.save();
-
-      // Populate staff info
-      await room.populate([
-        { path: 'customer_id', select: 'username email avatar_url' },
-        { path: 'assigned_staff_id', select: 'username email' }
-      ]);
-
-      // Tạo system message thông báo staff đã join
-      const systemMessage = new ChatMessage({
-        room_id: roomId,
-        sender_id: userId,
-        content: `${req.userData.username} has joined the chat`,
-        message_type: 'system'
-      });
-      await systemMessage.save();
+      // Lấy tin nhắn cuối cùng cho mỗi room
+      const roomsWithLastMessage = await Promise.all(
+        rooms.map(async (room) => {
+          const lastMessage = await ChatMessage.getLastMessageInRoom(room._id);
+          return {
+            ...room.toObject(),
+            last_message: lastMessage
+          };
+        })
+      );
 
       res.status(200).json({
         success: true,
         statusCode: 200,
-        message: 'Room assigned successfully',
-        data: room
-      });
-
-    } catch (error) {
-      console.error('Assign room error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null,
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    }
-  }
-
-  // Đóng room
-  async closeRoom(req, res) {
-    try {
-      const { roomId } = req.params;
-      const { reason } = req.body;
-      const userId = req.user.userId;
-      const userRole = req.userData.role;
-
-      // Tìm room
-      const room = await ChatRoom.findById(roomId);
-      if (!room) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Chat room not found',
-          data: null
-        });
-      }
-
-      // Kiểm tra quyền đóng room
-      const canClose = userRole === 'Admin' || 
-                      (userRole === 'Staff' && room.assigned_staff_id?.toString() === userId) ||
-                      (userRole === 'User' && room.customer_id.toString() === userId);
-
-      if (!canClose) {
-        return res.status(403).json({
-          success: false,
-          statusCode: 403,
-          message: 'You do not have permission to close this room',
-          data: null
-        });
-      }
-
-      // Đóng room
-      room.status = 'closed';
-      room.updated_at = new Date();
-      await room.save();
-
-      // Tạo system message thông báo đóng room
-      const systemMessage = new ChatMessage({
-        room_id: roomId,
-        sender_id: userId,
-        content: reason ? `Room closed: ${reason}` : 'Room has been closed',
-        message_type: 'system'
-      });
-      await systemMessage.save();
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Room closed successfully',
-        data: room
-      });
-
-    } catch (error) {
-      console.error('Close room error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null,
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    }
-  }
-
-  // Đánh dấu tin nhắn đã đọc
-  async markAsRead(req, res) {
-    try {
-      const { messageId } = req.params;
-      const userId = req.user.userId;
-
-      // Tìm message
-      const message = await ChatMessage.findById(messageId);
-      if (!message) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Message not found',
-          data: null
-        });
-      }
-
-      // Kiểm tra quyền truy cập room
-      const room = await ChatRoom.findById(message.room_id);
-      if (!room || !room.hasAccess(userId, req.userData.role)) {
-        return res.status(403).json({
-          success: false,
-          statusCode: 403,
-          message: 'Access denied',
-          data: null
-        });
-      }
-
-      // Đánh dấu đã đọc
-      await message.markAsReadBy(userId);
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Message marked as read',
-        data: null
-      });
-
-    } catch (error) {
-      console.error('Mark as read error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null,
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    }
-  }
-
-  // Đếm tin nhắn chưa đọc của user
-  async getUnreadCount(req, res) {
-    try {
-      const userId = req.user.userId;
-      const userRole = req.userData.role;
-
-      let totalUnread = 0;
-      let roomsWithUnread = [];
-
-      if (userRole === 'User') {
-        // Customer: đếm trong rooms của mình
-        const customerRooms = await ChatRoom.find({ 
-          customer_id: userId,
-          status: { $in: ['waiting', 'active'] }
-        });
-
-        for (const room of customerRooms) {
-          const unreadCount = await ChatMessage.countUnreadInRoom(room._id, userId);
-          if (unreadCount > 0) {
-            roomsWithUnread.push({
-              room_id: room._id,
-              unread_count: unreadCount
-            });
-            totalUnread += unreadCount;
-          }
-        }
-
-      } else if (['Staff', 'Admin'].includes(userRole)) {
-        // Staff: đếm trong rooms được assign
-        const assignedRooms = await ChatRoom.find({ 
-          assigned_staff_id: userId,
-          status: 'active'
-        });
-
-        for (const room of assignedRooms) {
-          const unreadCount = await ChatMessage.countUnreadInRoom(room._id, userId);
-          if (unreadCount > 0) {
-            roomsWithUnread.push({
-              room_id: room._id,
-              unread_count: unreadCount
-            });
-            totalUnread += unreadCount;
-          }
-        }
-      }
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Unread count retrieved successfully',
+        message: 'Rooms retrieved successfully',
         data: {
-          total_unread: totalUnread,
-          rooms_with_unread: roomsWithUnread
+          rooms: roomsWithLastMessage,
+          pagination: {
+            currentPage: Number(page),
+            totalPages: Math.ceil(totalCount / Number(limit)),
+            totalCount,
+            hasNextPage: Number(page) < Math.ceil(totalCount / Number(limit)),
+            hasPrevPage: Number(page) > 1,
+            limit: Number(limit)
+          }
         }
       });
 
     } catch (error) {
-      console.error('Get unread count error:', error);
+      console.error('Get rooms error:', error);
       res.status(500).json({
         success: false,
         statusCode: 500,
@@ -525,27 +176,27 @@ class ChatController extends BaseCrudController {
     }
   }
 
-  // Method để gửi tin nhắn (sẽ được Socket.IO sử dụng, không expose qua REST API)
-  async createMessage(roomId, senderId, content, messageType = 'text') {
+  // Helper method để tạo tin nhắn (cho Socket.IO sử dụng)
+  async createMessage(roomId, senderId, content, messageType = 'text', imageUrl = null, senderRole) {
     try {
       const room = await ChatRoom.findById(roomId);
       if (!room) {
         throw new Error('Room not found');
       }
 
-      const message = new ChatMessage({
-        room_id: roomId,
-        sender_id: senderId,
-        content: content,
-        message_type: messageType
-      });
+      let message;
+      
+      if (messageType === 'image' && imageUrl) {
+        message = ChatMessage.createImageMessage(roomId, senderId, imageUrl, content, senderRole);
+      } else {
+        message = ChatMessage.createTextMessage(roomId, senderId, content, senderRole);
+      }
 
       const savedMessage = await message.save();
 
-      // Cập nhật last_message_at của room
-      await ChatRoom.findByIdAndUpdate(roomId, {
-        last_message_at: new Date()
-      });
+      // Cập nhật room's updated_at
+      room.updated_at = new Date();
+      await room.save();
 
       // Populate sender info
       await savedMessage.populate('sender_id', 'username avatar_url role');
@@ -557,20 +208,94 @@ class ChatController extends BaseCrudController {
       throw error;
     }
   }
+
+  // 4. Upload ảnh cho chat
+  async uploadImage(req, res) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'No image file provided',
+          data: null
+        });
+      }
+
+      // Cloudinary tự động upload và trả về URL
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Image uploaded successfully',
+        data: {
+          imageUrl: req.file.path,
+          originalName: req.file.originalname,
+          size: req.file.size,
+          uploadedBy: req.user.userId
+        }
+      });
+
+    } catch (error) {
+      console.error('Upload image error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Failed to upload image',
+        data: null,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  }
+
+  // 🔔 Helper method để gửi chat notification
+  async sendChatNotification(roomId, messageContent, senderInfo) {
+    try {
+      const { sendNotificationToUser } = require('./pushTokenController');
+      const room = await ChatRoom.findById(roomId).populate('customer_id', '_id username');
+      
+      if (!room) {
+        return { success: false, message: 'Room not found' };
+      }
+
+      const customerId = room.customer_id._id.toString();
+      const senderId = senderInfo.id;
+      
+      // Nếu staff gửi cho customer
+      if (senderInfo.role !== 'User') {
+        const result = await sendNotificationToUser(customerId, {
+          title: '💬 Tin nhắn từ hỗ trợ',
+          body: `${senderInfo.username}: ${messageContent}`,
+          type: 'chat_message',
+          relatedEntityId: roomId,
+          relatedEntityType: 'ChatRoom',
+          data: {
+            roomId: roomId,
+            staffId: senderId,
+            staffName: senderInfo.username
+          }
+        });
+        
+        return result;
+      }
+      
+      return { success: false, message: 'No notification needed' };
+      
+    } catch (error) {
+      console.error('Send chat notification error:', error);
+      return { success: false, message: error.message };
+    }
+  }
 }
 
-// Export controller instance với methods đã bind
+// Export controller instance
 const chatController = new ChatController();
 
 module.exports = {
-  createChatRoom: chatController.createChatRoom.bind(chatController),
-  getChatRooms: chatController.getChatRooms.bind(chatController),
+  startChat: chatController.startChat.bind(chatController),
   getChatHistory: chatController.getChatHistory.bind(chatController),
-  assignRoom: chatController.assignRoom.bind(chatController),
-  closeRoom: chatController.closeRoom.bind(chatController),
-  markAsRead: chatController.markAsRead.bind(chatController),
-  getUnreadCount: chatController.getUnreadCount.bind(chatController),
+  getRooms: chatController.getRooms.bind(chatController),
+  uploadImage: chatController.uploadImage.bind(chatController),
   
-  // Internal method cho Socket.IO (không expose qua routes)
-  createMessage: chatController.createMessage.bind(chatController)
+  // Internal methods
+  createMessage: chatController.createMessage.bind(chatController),
+  sendChatNotification: chatController.sendChatNotification.bind(chatController)
 };
