@@ -98,32 +98,15 @@ server.listen(PORT, () => {
 
 function setupChatServices() {
   try {
-    const ChatSocketHandler = require('./src/socket/chatSocketHandler');
-    const socketHandler = new ChatSocketHandler(io);
+    const SimpleChatSocket = require('./src/socket/ChatSocket');
+    const socketHandler = new SimpleChatSocket(io);
+    
     app.set('socketHandler', socketHandler);
-    console.log('✅ Socket handler registered with Express app');
-    const ChatRealtimeService = require('./src/services/chatRealtimeService');
-    const chatRealtimeService = new ChatRealtimeService(socketHandler);
 
-    chatRealtimeService.startWatching();
-
-    app.set('socketHandler', socketHandler);
-    app.set('chatRealtimeService', chatRealtimeService);
-
-    process.on('SIGTERM', () => {
-      console.log('🛑 Shutting down gracefully...');
-      chatRealtimeService.stopWatching();
-      process.exit(0);
-    });
-
-    process.on('SIGINT', () => {
-      console.log('🛑 Shutting down gracefully...');
-      chatRealtimeService.stopWatching();
-      process.exit(0);
-    });
-
-    console.log('✅ Chat services initialized successfully');
+    console.log('✅ Simple Chat Socket initialized successfully');
+    console.log('� Socket events: authenticate, join_chat, send_message, disconnect');
 
   } catch (error) {
+    console.error('❌ Failed to initialize chat services:', error);
   }
 }
