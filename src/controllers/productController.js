@@ -22,97 +22,97 @@ class ProductController extends BaseCrudController {
   }
 
   // ✅ FIX: Enhanced getAll to always include images
-  async getAllProducts(req, res) {
-    try {
-      const {
-        page = 1,
-        limit = 10,
-        sortBy = 'created_at',
-        sortOrder = 'desc',
-        status,
-        categoryId,
-        keyword
-      } = req.query;
+  // async getAllProducts(req, res) {
+  //   try {
+  //     const {
+  //       page = 1,
+  //       limit = 10,
+  //       sortBy = 'created_at',
+  //       sortOrder = 'desc',
+  //       status,
+  //       categoryId,
+  //       keyword
+  //     } = req.query;
 
-      console.log('🔍 GetAllProducts called with params:', {
-        page, limit, sortBy, sortOrder, status, categoryId, keyword
-      });
+  //     console.log('🔍 GetAllProducts called with params:', {
+  //       page, limit, sortBy, sortOrder, status, categoryId, keyword
+  //     });
 
-      // Build filter
-      const filter = {};
-      if (status) filter.status = status;
-      if (categoryId) filter.category_id = categoryId;
-      if (keyword) {
-        filter.$or = [
-          { name: { $regex: keyword, $options: 'i' } },
-          { description: { $regex: keyword, $options: 'i' } }
-        ];
-      }
+  //     // Build filter
+  //     const filter = {};
+  //     if (status) filter.status = status;
+  //     if (categoryId) filter.category_id = categoryId;
+  //     if (keyword) {
+  //       filter.$or = [
+  //         { name: { $regex: keyword, $options: 'i' } },
+  //         { description: { $regex: keyword, $options: 'i' } }
+  //       ];
+  //     }
 
-      // Build sort
-      const sort = {};
-      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+  //     // Build sort
+  //     const sort = {};
+  //     sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
 
-      const skip = (Number(page) - 1) * Number(limit);
+  //     const skip = (Number(page) - 1) * Number(limit);
 
-      // Get products with category populated
-      const products = await this.model.find(filter)
-        .populate('category_id', 'name description')
-        .sort(sort)
-        .skip(skip)
-        .limit(Number(limit))
-        .lean();
+  //     // Get products with category populated
+  //     const products = await this.model.find(filter)
+  //       .populate('category_id', 'name description')
+  //       .sort(sort)
+  //       .skip(skip)
+  //       .limit(Number(limit))
+  //       .lean();
 
-      console.log(`📦 Found ${products.length} products`);
+  //     console.log(`📦 Found ${products.length} products`);
 
-      // ✅ FIX: Always populate images for each product
-      if (this.imageModel && products.length > 0) {
-        for (let product of products) {
-          const images = await this.imageModel
-            .find({ [this.getImageForeignKey()]: product._id })
-            .lean();
-          product.images = images;
-          console.log(`🖼️ Product ${product.name} has ${images.length} images`);
-        }
-      }
+  //     // ✅ FIX: Always populate images for each product
+  //     if (this.imageModel && products.length > 0) {
+  //       for (let product of products) {
+  //         const images = await this.imageModel
+  //           .find({ [this.getImageForeignKey()]: product._id })
+  //           .lean();
+  //         product.images = images;
+  //         console.log(`🖼️ Product ${product.name} has ${images.length} images`);
+  //       }
+  //     }
 
-      // Count total for pagination
-      const totalCount = await this.model.countDocuments(filter);
-      const totalPages = Math.ceil(totalCount / Number(limit));
+  //     // Count total for pagination
+  //     const totalCount = await this.model.countDocuments(filter);
+  //     const totalPages = Math.ceil(totalCount / Number(limit));
 
-      console.log('✅ GetAllProducts response ready:', {
-        productsCount: products.length,
-        totalCount,
-        currentPage: page,
-        totalPages
-      });
+  //     console.log('✅ GetAllProducts response ready:', {
+  //       productsCount: products.length,
+  //       totalCount,
+  //       currentPage: page,
+  //       totalPages
+  //     });
 
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Products retrieved successfully',
-        data: {
-          products,
-          pagination: {
-            currentPage: Number(page),
-            totalPages,
-            totalCount,
-            hasNextPage: Number(page) < totalPages,
-            hasPrevPage: Number(page) > 1,
-            limit: Number(limit)
-          }
-        }
-      });
-    } catch (error) {
-      console.error('❌ GetAllProducts error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
-    }
-  }
+  //     res.status(200).json({
+  //       success: true,
+  //       statusCode: 200,
+  //       message: 'Products retrieved successfully',
+  //       data: {
+  //         products,
+  //         pagination: {
+  //           currentPage: Number(page),
+  //           totalPages,
+  //           totalCount,
+  //           hasNextPage: Number(page) < totalPages,
+  //           hasPrevPage: Number(page) > 1,
+  //           limit: Number(limit)
+  //         }
+  //       }
+  //     });
+  //   } catch (error) {
+  //     console.error('❌ GetAllProducts error:', error);
+  //     res.status(500).json({
+  //       success: false,
+  //       statusCode: 500,
+  //       message: 'Internal server error',
+  //       data: null
+  //     });
+  //   }
+  // }
 
   // ✅ FIX: Enhanced getProductById to include images
   async getProductById(req, res) {
@@ -623,7 +623,8 @@ class ProductController extends BaseCrudController {
 const productController = new ProductController();
 module.exports = {
   createProduct: productController.create.bind(productController),
-  getAllProducts: productController.getAllProducts.bind(productController),
+  getAllProducts: productController.getAll.bind(productController),
+  // getAllProductsUser: productController.getAll.bind(productController),
   updateProduct: productController.update.bind(productController),
   deleteProduct: productController.delete.bind(productController),
   searchProducts: productController.searchProducts.bind(productController),

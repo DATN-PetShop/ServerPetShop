@@ -10,7 +10,7 @@ const {
   deleteProduct,
   searchProducts,
   getFilterOptions,
-  getProductById
+  getProductById,
 } = require('../controllers/productController');
 
 // ✅ QUAN TRỌNG: Đặt route cụ thể TRƯỚC route động /:id
