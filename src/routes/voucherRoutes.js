@@ -18,7 +18,7 @@ router.get('/admin', auth, requireRoles(['Admin']), getAllVouchers);
 
 router.post('/', auth, requireRoles(['Admin', 'Staff']), createVoucher);
 
-router.put('/:id', auth, requireRoles(['Admin', 'Staff']), updateVoucher);// kiem tra quyeen
+router.put('/:id', auth, updateVoucher);// kiem tra quyeen
 
 router.put('/:id', auth, updateVoucher);
 

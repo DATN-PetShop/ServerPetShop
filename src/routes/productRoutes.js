@@ -1,4 +1,3 @@
-// src/routes/productRoutes.js - SỬA THỨ TỰ ROUTE
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
@@ -11,7 +10,7 @@ const {
   deleteProduct,
   searchProducts,
   getFilterOptions,
-  getProductById
+  getProductById,
 } = require('../controllers/productController');
 
 // ✅ QUAN TRỌNG: Đặt route cụ thể TRƯỚC route động /:id
@@ -25,6 +24,6 @@ router.get('/:id', getProductById);              // ✅ Đặt cuối cùng
 // Admin/Staff routes
 router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createProduct);
 router.put('/:id', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), updateProduct);
-router.delete('/:id', auth, requireRoles(['Admin']), deleteProduct);
+router.delete('/:id', auth, requireRoles(['Admin', 'Staff']), deleteProduct);
 
 module.exports = router;

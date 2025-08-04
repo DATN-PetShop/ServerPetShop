@@ -7,7 +7,8 @@ const {
   getOrderById,
   updateOrder,
   deleteOrder,
-  saveVnpayOrder
+  saveVnpayOrder,
+  cancelOrder
 } = require('../controllers/orderController');
 
 // ✅ THÊM MỚI: Import Admin Controller Functions
@@ -27,13 +28,15 @@ const requireRole = require('../middleware/requireRole');
 // ============= USER ROUTES (GIỮ NGUYÊN) =========
 // ================================================
 router.get('/', auth, getMyOrders); // Get list of user's orders
+
 router.get('/:id', auth, getOrderById); // Get single order by ID
 
 router.post('/', auth, createOrder); // Create new order
 router.put('/:id', auth, requireRole(['Admin', 'Staff']), updateOrder); // Update order
 router.delete('/:id', auth, requireRole(['Admin']), deleteOrder); // Delete order
 router.post('/vnpay', saveVnpayOrder);
-
+// THÊM MỚI: Hủy đơn hàng
+router.patch('/:id/cancel', auth, cancelOrder); // Cancel order
 // ================================================
 // ========= THÊM MỚI: ADMIN ROUTES ===============
 // ================================================
