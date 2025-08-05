@@ -30,6 +30,34 @@ const auth = async (req, res, next) => {
       });
     }
 
+    // ✅ Kiểm tra trạng thái user trước khi cho phép truy cập
+    if (user.status === 'banned') {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: 'Your account has been banned. Please contact support.',
+        data: null
+      });
+    }
+
+    if (user.status === 'suspended') {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: 'Your account has been suspended. Please contact support.',
+        data: null
+      });
+    }
+
+    if (user.status === 'inactive') {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: 'Your account is inactive. Please contact support to activate.',
+        data: null
+      });
+    }
+
     req.user = decoded;
     req.user.id = decoded.userId;
     req.userData = user;
