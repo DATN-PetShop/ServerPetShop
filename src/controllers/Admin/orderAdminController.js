@@ -44,6 +44,7 @@ const getAllOrders = async (req, res) => {
       .sort(sort)
       .skip(skip)
       .limit(Number(limit))
+      .sort({ created_at: -1 }) // ✅ Sắp xếp theo thời gian tạo mới nhất lên đầu
       .lean();
 
     if (search) {
