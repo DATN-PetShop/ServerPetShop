@@ -10,7 +10,8 @@ const {
   getReviewById,
   getReviewsByPet,
   updateReview,
-  deleteReview
+  deleteReview,
+  createReviewFromOrderItem
 } = require('../controllers/reviewController');
 
 // ===== PUBLIC ROUTES =====
@@ -48,7 +49,12 @@ router.put('/:id',
   upload.array('images', 3), 
   updateReview
 );
-
+// Route đặc biệt để tạo review từ order item (có kiểm tra quyền sở hữu và trạng thái)
+router.post('/from-order-item', 
+  auth, 
+  upload.array('images', 3), 
+  createReviewFromOrderItem
+);
 // ===== ADMIN/USER ROUTES =====
 // Xóa review (Admin hoặc User owner)
 router.delete('/:id', auth, deleteReview);

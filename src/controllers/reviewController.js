@@ -373,6 +373,157 @@ class ReviewController extends BaseCrudController {
       });
     }
   }
+   // ✅ CUNG CẤP METHOD ĐỂ TẠO REVIEW TỪ ORDER ITEM
+  async createReviewFromOrderItem(req, res) {
+    try {
+      console.log('REQ.BODY:', req.body);
+      console.log('REQ.USER:', req.user);
+      console.log('REQ.FILES:', req.files);
+
+      // Cấm Admin tạo đánh giá
+      if (req.user && req.user.role === 'Admin') {
+        return res.status(403).json({
+          success: false,
+          statusCode: 403,
+          message: 'Admin không có quyền tạo đánh giá',
+          data: null
+        });
+      }
+
+      const { orderItemId, ...reviewData } = req.body;
+      const userId = req.user?.id;
+
+      // ✅ KIỂM TRA ORDER ITEM VÀ QUYỀN SỞ HỮU
+      if (orderItemId) {
+        const orderItem = await OrderItem.findById(orderItemId)
+          .populate('order_id', 'user_id status')
+          .lean();
+
+        if (!orderItem) {
+          return res.status(404).json({
+            success: false,
+            statusCode: 404,
+            message: 'Order item không tồn tại',
+            data: null
+          });
+        }
+
+        // Kiểm tra quyền sở hữu
+        if (orderItem.order_id.user_id.toString() !== userId) {
+          return res.status(403).json({
+            success: false,
+            statusCode: 403,
+            message: 'Bạn không có quyền đánh giá order item này',
+            data: null
+          });
+        }
+
+        // Kiểm tra trạng thái đơn hàng
+        if (orderItem.order_id.status !== 'completed') {
+          return res.status(400).json({
+            success: false,
+            statusCode: 400,
+            message: 'Chỉ có thể đánh giá đơn hàng đã hoàn thành',
+            data: null
+          });
+        }
+
+        // ✅ KIỂM TRA ĐÃ ĐÁNH GIÁ CHƯA
+        let existingReview = null;
+        
+        if (orderItem.pet_id) {
+          existingReview = await Review.findOne({
+            pet_id: orderItem.pet_id,
+            user_id: userId
+          }).lean();
+        } else if (orderItem.product_id) {
+          existingReview = await Review.findOne({
+            product_id: orderItem.product_id,
+            user_id: userId
+          }).lean();
+        }
+
+        if (existingReview) {
+          return res.status(400).json({
+            success: false,
+            statusCode: 400,
+            message: 'Bạn đã đánh giá sản phẩm này rồi',
+            data: null
+          });
+        }
+
+        // Tự động điền pet_id hoặc product_id từ orderItem
+        if (orderItem.pet_id && !reviewData.pet_id) {
+          reviewData.pet_id = orderItem.pet_id;
+        }
+        if (orderItem.product_id && !reviewData.product_id) {
+          reviewData.product_id = orderItem.product_id;
+        }
+      }
+
+      // Kiểm tra required fields
+      const requiredFields = this.getRequiredFields();
+      const missingFields = requiredFields.filter(field => !reviewData[field]);
+
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: `${missingFields.join(', ')} is required`,
+          data: null
+        });
+      }
+
+      // Tạo review data
+      const finalReviewData = {
+        ...reviewData,
+        user_id: userId,
+        // ✅ LƯU THÔNG TIN ORDER ITEM NẾU CÓ
+        order_item_id: orderItemId || null
+      };
+
+      // Tạo review
+      const review = new this.model(finalReviewData);
+      const savedReview = await review.save();
+
+      // Xử lý upload ảnh nếu có
+      if (this.imageModel && req.files && req.files.length > 0) {
+        const imageDocs = req.files.map((file, index) => ({
+          url: file.path, // Cloudinary URL
+          is_primary: index === 0, // Ảnh đầu tiên là ảnh chính
+          [this.getImageForeignKey()]: savedReview._id
+        }));
+        
+        await this.imageModel.insertMany(imageDocs);
+        
+        // Gắn ảnh vào response
+        const images = await this.imageModel.find({ 
+          [this.getImageForeignKey()]: savedReview._id 
+        }).lean();
+        savedReview.images = images;
+      }
+
+      console.log("REVIEW SAVED:", savedReview);
+
+      res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: 'Tạo đánh giá thành công',
+        data: {
+          ...savedReview.toObject(),
+          orderItemId: orderItemId
+        }
+      });
+    } catch (error) {
+      console.error('Lỗi khi tạo đánh giá từ order item:', error);
+      res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: error.message || 'Lỗi khi tạo đánh giá',
+        data: null
+      });
+    }
+  }
 }
 
 const reviewController = new ReviewController();
@@ -383,5 +534,7 @@ module.exports = {
   getReviewById: reviewController.getById.bind(reviewController),
   getReviewsByPet: reviewController.getReviewsByPet.bind(reviewController),
   updateReview: reviewController.update.bind(reviewController),
-  deleteReview: reviewController.delete.bind(reviewController)
+  deleteReview: reviewController.delete.bind(reviewController),
+  createReviewFromOrderItem: reviewController.createReviewFromOrderItem.bind(reviewController), // ✅ Thêm method mới
+
 };
