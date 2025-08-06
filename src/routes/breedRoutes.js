@@ -35,10 +35,10 @@ router.get('/category/:categoryId', auth, getBreedsByCategory);
 
 // ===== ADMIN/STAFF ROUTES =====
 // Tạo breed mới (Admin/Staff only)
-router.post('/', auth, requireRoles(['Admin', 'Staff']), createBreed);
+router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createBreed);
 
 // Cập nhật breed (Admin/Staff only)
-router.put('/:id', auth, requireRoles(['Admin', 'Staff']), updateBreed);
+router.put('/:id', auth, requireRoles(['Admin', 'Staff']),upload.array('images', 5),  updateBreed);
 
 // ai cung xem dc
 router.get('/', auth, getAllBreeds); 
