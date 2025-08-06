@@ -15,7 +15,9 @@ const {
   getUserById,
   updateUser,
   deleteUser,
-  changePassword
+  changePassword,
+  banUser,       // ✅ Thêm import
+  unbanUser      // ✅ Thêm import
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 const requireRoles = require('../middleware/requireRole');
@@ -35,6 +37,8 @@ router.get('/', auth, requireRoles(['Admin']), getAllUsers);
 router.get('/staff-only', auth, requireRoles(['Admin']), getStaffUsers); // Route mới
 router.get('/customers', auth, requireRoles(['Admin', 'Staff']), getCustomerUsers);     // ← Route mới
 router.patch('/:id/status', auth, requireRoles(['Admin']), updateCustomerStatus); // ← Route mới
+router.patch('/:id/ban', auth, requireRoles(['Admin']), banUser);           // ✅ Route ban user
+router.patch('/:id/unban', auth, requireRoles(['Admin']), unbanUser);       // ✅ Route unban user
 
 router.get('/:id', auth, requireRoles(['Admin', 'Staff']), getUserById);
 router.put('/:id', auth, updateUser);

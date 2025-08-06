@@ -6,7 +6,7 @@ const { sendWelcomeNotification } = require('../services/notificationService');
 
 // Generate JWT Token
 const generateToken = (userId, role) => {
-  return jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign({ userId, role,  }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
 // @desc    Register a new user
@@ -117,6 +117,34 @@ const loginUser = async (req, res) => {
       });
     }
 
+    // ✅ Kiểm tra trạng thái user trước khi cho login
+    if (user.status === 'banned') {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: 'Your account has been banned. Please contact support.',
+        data: null
+      });
+    }
+
+    if (user.status === 'suspended') {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: 'Your account has been suspended. Please contact support.',
+        data: null
+      });
+    }
+
+    if (user.status === 'inactive') {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: 'Your account is inactive. Please contact support to activate.',
+        data: null
+      });
+    }
+
     // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
     if (!isPasswordValid) {
@@ -178,6 +206,7 @@ const getCurrentUser = async (req, res) => {
           username: user.username,
           email: user.email,
           role: user.role,
+          status: user.status,
           phone: user.phone,
           avatar_url: user.avatar_url,
           created_at: user.created_at,
@@ -609,7 +638,7 @@ const updateCustomerStatus = async (req, res) => {
     const { status } = req.body;
     
     // Validate status
-    const validStatuses = ['active', 'inactive', 'suspended', 'pending'];
+    const validStatuses = ['active', 'inactive', 'suspended', 'banned'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -669,6 +698,111 @@ const updateCustomerStatus = async (req, res) => {
     });
   }
 };
+
+// @desc    Ban user
+// @route   PATCH /api/users/:id/ban
+// @access  Private (Admin only)
+const banUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    
+    // Không cho phép ban Admin
+    if (user.role === 'Admin') {
+      return res.status(403).json({
+        success: false,
+        statusCode: 403,
+        message: 'Cannot ban admin users',
+        data: null
+      });
+    }
+    
+    user.status = 'banned';
+    await user.save();
+    
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'User banned successfully',
+      data: {
+        user: {
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+          status: user.status,
+          banned_reason: reason || 'No reason provided'
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Ban user error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// @desc    Unban user
+// @route   PATCH /api/users/:id/unban
+// @access  Private (Admin only)
+const unbanUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'User not found',
+        data: null
+      });
+    }
+    
+    user.status = 'active';
+    await user.save();
+    
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'User unbanned successfully',
+      data: {
+        user: {
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+          status: user.status
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Unban user error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
@@ -684,4 +818,6 @@ module.exports = {
   getCustomerUsers,
   updateCustomerStatus,
   changePassword,
+  banUser,
+  unbanUser,
 };

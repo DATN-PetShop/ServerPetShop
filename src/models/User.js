@@ -25,7 +25,7 @@ const userSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'inactive'],
+    enum: ['active', 'inactive', 'banned', 'suspended'],
     default: 'active',
   },
   phone: {
@@ -63,6 +63,16 @@ userSchema.virtual('isActive').get(function() {
   return this.status === 'active';
 });
 
+// Virtual field để check xem user có bị banned không
+userSchema.virtual('isBanned').get(function() {
+  return this.status === 'banned';
+});
+
+// Virtual field để check xem user có bị suspended không
+userSchema.virtual('isSuspended').get(function() {
+  return this.status === 'suspended';
+});
+
 // Instance method để activate user
 userSchema.methods.activate = function() {
   this.status = 'active';
@@ -72,6 +82,18 @@ userSchema.methods.activate = function() {
 // Instance method để deactivate user
 userSchema.methods.deactivate = function() {
   this.status = 'inactive';
+  return this.save();
+};
+
+// Instance method để ban user
+userSchema.methods.ban = function() {
+  this.status = 'banned';
+  return this.save();
+};
+
+// Instance method để suspend user
+userSchema.methods.suspend = function() {
+  this.status = 'suspended';
   return this.save();
 };
 
