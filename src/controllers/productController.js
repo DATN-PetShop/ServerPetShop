@@ -1,6 +1,9 @@
 // WebPetShopAdmin/src/controllers/productController.js - FIX IMAGE DISPLAY
 const Product = require('../models/Product');
 const ProductImage = require('../models/ProductImage');
+const Pet = require('../models/Pet');
+const PetImage = require('../models/ImagePet');
+const PetVariant = require('../models/PetVariant');
 const BaseCrudController = require('./baseCrudController');
 const mongoose = require('mongoose');
 
@@ -618,16 +621,307 @@ class ProductController extends BaseCrudController {
       return null;
     }
   }
+  /**
+   * 🔥 LOGIC THÔNG MINH: Lấy items liên quan cho sản phẩm
+   * Route: GET /api/products/:id/related
+   */
+async findPetsForProductType(productCategory, productName, limit = 4) {
+    try {
+      console.log('🔍 Finding pets for product:', { productCategory, productName, limit });
+
+      const relatedPets = [];
+      
+      // 🔥 DEBUG: First, let's see what pet types exist in database
+      const allPetTypes = await Pet.distinct('type');
+      console.log('🐾 All pet types in database:', allPetTypes);
+      
+      // ✅ FIX: Enhanced mapping với nhiều variations
+      const productToPetMapping = {
+        'Thức ăn cho chó': { 
+          types: ['Chó', 'Dog', 'dog', 'CHÓ'], 
+          keywords: ['chó', 'dog', 'canine'] 
+        },
+        'Thức ăn cho mèo': { 
+          types: ['Mèo', 'Cat', 'cat', 'MÈO'], 
+          keywords: ['mèo', 'cat', 'feline'] 
+        },
+        'Phụ kiện chó': { 
+          types: ['Chó', 'Dog', 'dog', 'CHÓ'], 
+          keywords: ['chó', 'dog', 'canine'] 
+        },
+        'Phụ kiện mèo': { 
+          types: ['Mèo', 'Cat', 'cat', 'MÈO'], 
+          keywords: ['mèo', 'cat', 'feline'] 
+        },
+        'Đồ chơi': { 
+          types: null, 
+          keywords: ['chó', 'mèo', 'dog', 'cat'] 
+        },
+        'Vệ sinh': { 
+          types: null, 
+          keywords: ['chó', 'mèo', 'dog', 'cat'] 
+        }
+      };
+
+      let targetMapping = null;
+      
+      // Find matching category
+      if (productCategory) {
+        targetMapping = productToPetMapping[productCategory];
+        console.log('📋 Found category mapping:', targetMapping);
+      }
+      
+      // Fallback: check product name for keywords
+      if (!targetMapping) {
+        const lowerProductName = productName.toLowerCase();
+        for (const [category, mapping] of Object.entries(productToPetMapping)) {
+          if (mapping.keywords.some(keyword => lowerProductName.includes(keyword))) {
+            targetMapping = mapping;
+            console.log('🔍 Found keyword mapping:', category, targetMapping);
+            break;
+          }
+        }
+      }
+
+      if (targetMapping) {
+        const petFilter = { status: 'available' };
+        
+        // ✅ FIX: Better type filtering
+        if (targetMapping.types && targetMapping.types.length > 0) {
+          // Try exact matches first, then regex as fallback
+          petFilter.$or = [
+            { type: { $in: targetMapping.types } },
+            { type: { $regex: targetMapping.types.join('|'), $options: 'i' } }
+          ];
+          console.log('🎯 Using specific type filter:', petFilter);
+        } else {
+          // General category - include common pets
+          petFilter.$or = [
+            { type: { $regex: 'chó|dog', $options: 'i' } },
+            { type: { $regex: 'mèo|cat', $options: 'i' } }
+          ];
+          console.log('🎯 Using general type filter:', petFilter);
+        }
+
+        // 🔥 DEBUG: Log the exact query
+        console.log('🔍 Pet query filter:', JSON.stringify(petFilter, null, 2));
+
+        const pets = await Pet.find(petFilter)
+          .populate('breed_id', 'name')
+          .limit(limit)
+          .lean();
+
+        console.log(`🐾 Raw pet results count: ${pets.length}`);
+        console.log(`🐾 Pet types found:`, pets.map(p => ({ name: p.name, type: p.type })));
+
+        for (let pet of pets) {
+          try {
+            // ✅ FIX: Try multiple possible PetImage model references
+            let petImages = [];
+            try {
+              petImages = await PetImage.find({ pet_id: pet._id })
+                .select('url is_primary')
+                .lean();
+            } catch (imageError) {
+              console.log(`⚠️ PetImage model might have different name, trying alternatives...`);
+              // Try alternative model names if they exist
+              try {
+                const ImagePet = require('../models/ImagePet');
+                petImages = await ImagePet.find({ pet_id: pet._id })
+                  .select('url is_primary')
+                  .lean();
+              } catch (altError) {
+                console.log(`⚠️ Could not find pet images for ${pet.name}:`, altError.message);
+              }
+            }
+            
+            pet.images = petImages;
+            console.log(`🖼️ Pet ${pet.name} has ${petImages.length} images`);
+            
+            // Get pet variants
+            const variants = await PetVariant.find({ 
+              pet_id: pet._id, 
+              is_available: true 
+            }).limit(3).lean();
+            
+            pet.variants = variants.map(variant => ({
+              ...variant,
+              final_price: pet.price + variant.price_adjustment
+            }));
+
+            pet.itemType = 'pet';
+            pet.relationshipType = 'suitable-for-product';
+            
+            relatedPets.push(pet);
+          } catch (petError) {
+            console.error(`❌ Error processing pet ${pet.name}:`, petError);
+          }
+        }
+
+        console.log(`🐕 Final result: Found ${relatedPets.length} pets for category: ${productCategory || 'detected from name'}`);
+      } else {
+        console.log('❌ No mapping found for category/product name');
+      }
+
+      return relatedPets;
+      
+    } catch (error) {
+      console.error('❌ Error in findPetsForProductType:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 🆕 NEW: Helper method to find products with similar prices
+   */
+  async findSimilarPriceProducts(currentProduct, limit = 4) {
+    try {
+      console.log('🔍 Finding similar price products for:', currentProduct.name, 'price:', currentProduct.price);
+
+      // Calculate price range (±20%)
+      const priceVariation = 0.2;
+      const minPrice = currentProduct.price * (1 - priceVariation);
+      const maxPrice = currentProduct.price * (1 + priceVariation);
+
+      const similarProducts = await Product.find({
+        _id: { $ne: currentProduct._id },
+        price: { $gte: minPrice, $lte: maxPrice },
+        status: 'active'
+      })
+      .populate('category_id', 'name description')
+      .limit(limit)
+      .lean();
+
+      // Add images to each product
+      for (let product of similarProducts) {
+        const images = await this.imageModel.find({ product_id: product._id })
+          .select('url is_primary')
+          .lean();
+        product.images = images;
+        product.itemType = 'product';
+        product.relationshipType = 'similar-price';
+      }
+
+      console.log(`💰 Found ${similarProducts.length} products with similar price range: ${minPrice.toFixed(0)} - ${maxPrice.toFixed(0)}`);
+      
+      return similarProducts;
+      
+    } catch (error) {
+      console.error('❌ Error in findSimilarPriceProducts:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 🔥 LOGIC THÔNG MINH: Lấy items liên quan cho sản phẩm
+   * Route: GET /api/products/:id/related
+   */
+  async getRelatedItems(req, res) {
+    try {
+      const { id: productId } = req.params;
+      const { limit = 8 } = req.query;
+
+      console.log('🔍 Finding related items for product:', productId);
+
+      // 1️⃣ Lấy thông tin sản phẩm hiện tại
+      const currentProduct = await Product.findById(productId)
+        .populate('category_id')
+        .lean();
+
+      if (!currentProduct) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Không tìm thấy sản phẩm',
+          data: null
+        });
+      }
+
+      const relatedItems = [];
+
+      // 2️⃣ Lấy sản phẩm cùng category (ưu tiên cao nhất)
+      const sameCategoryProducts = await Product.find({
+        category_id: currentProduct.category_id?._id,
+        _id: { $ne: productId },
+        status: 'active'
+      })
+      .populate('category_id')
+      .limit(4)
+      .lean();
+
+      // Thêm ảnh và đánh dấu loại cho products cùng category
+      for (let product of sameCategoryProducts) {
+        product.images = await this.imageModel.find({ product_id: product._id })
+          .select('url is_primary')
+          .lean();
+        product.itemType = 'product';
+        product.relationshipType = 'same-category';
+      }
+
+      relatedItems.push(...sameCategoryProducts);
+
+      // 3️⃣ Tìm thú cưng phù hợp với sản phẩm
+      const relatedPets = await this.findPetsForProductType(
+        currentProduct.category_id?.name,
+        currentProduct.name,
+        Math.min(4, limit - relatedItems.length)
+      );
+      
+      relatedItems.push(...relatedPets);
+
+      // 4️⃣ Nếu chưa đủ, thêm sản phẩm có giá tương tự
+      if (relatedItems.length < limit) {
+        const similarPriceProducts = await this.findSimilarPriceProducts(
+          currentProduct,
+          limit - relatedItems.length
+        );
+        relatedItems.push(...similarPriceProducts);
+      }
+
+      // 5️⃣ Trả về kết quả
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        data: {
+          relatedItems: relatedItems.slice(0, limit),
+          totalCount: relatedItems.length,
+          currentProduct: {
+            id: currentProduct._id,
+            name: currentProduct.name,
+            category: currentProduct.category_id?.name,
+            price: currentProduct.price
+          },
+          breakdown: {
+            sameCategory: sameCategoryProducts.length,
+            relatedPets: relatedPets.length,
+            similarPrice: Math.max(0, relatedItems.length - sameCategoryProducts.length - relatedPets.length)
+          }
+        },
+        message: `Tìm thấy ${relatedItems.length} items liên quan cho ${currentProduct.name}`
+      });
+
+    } catch (error) {
+      console.error('❌ Error in getRelatedItems for product:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi server khi lấy items liên quan',
+        data: null,
+        error: error.message
+      });
+    }
+  }
 }
 
 const productController = new ProductController();
 module.exports = {
   createProduct: productController.create.bind(productController),
   getAllProducts: productController.getAll.bind(productController),
-  // getAllProductsUser: productController.getAll.bind(productController),
   updateProduct: productController.update.bind(productController),
   deleteProduct: productController.delete.bind(productController),
   searchProducts: productController.searchProducts.bind(productController),
   getFilterOptions: productController.getFilterOptions.bind(productController),
-  getProductById: productController.getProductById.bind(productController)
+  getProductById: productController.getProductById.bind(productController),
+  getRelatedItems: productController.getRelatedItems.bind(productController),
+
 };
