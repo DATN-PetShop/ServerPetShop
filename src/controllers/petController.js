@@ -3,6 +3,8 @@ const Image = require('../models/ImagePet');
 const BaseCrudController = require('./baseCrudController');
 const mongoose = require('mongoose');
 const PetVariant = require('../models/PetVariant');
+const Product = require('../models/Product');
+const ProductImage = require('../models/ProductImage');
 class PetController extends BaseCrudController {
   constructor() {
     super(Pet, Image);
@@ -2313,95 +2315,395 @@ async searchPets(req, res) {
     }
   }
 
-// Cập nhật method create để tự động tạo default variant
-async create(req, res) {
-  try {
-    const { name, price, type, breed_id, description, age, weight, gender, color } = req.body;
-    
-    // Validate required fields
-    const requiredFields = this.getRequiredFields();
-    for (const field of requiredFields) {
-      if (!req.body[field]) {
-        return res.status(400).json({
+  // Cập nhật method create để tự động tạo default variant
+  async create(req, res) {
+    try {
+      const { name, price, type, breed_id, description, age, weight, gender, color } = req.body;
+      
+      // Validate required fields
+      const requiredFields = this.getRequiredFields();
+      for (const field of requiredFields) {
+        if (!req.body[field]) {
+          return res.status(400).json({
+            success: false,
+            statusCode: 400,
+            message: `${field} is required`,
+            data: null
+          });
+        }
+      }
+
+      // Tạo pet object
+      const petData = {
+        ...req.body,
+        // user_id: req.user.userId
+      };
+
+      // Tạo pet
+      const newEntity = new this.model(petData);
+      const savedEntity = await newEntity.save();
+
+      // 🆕 Tự động tạo default variant
+      if (age || weight || gender || color) {
+        await this.createDefaultVariants(savedEntity._id, {
+          age: age || 1,
+          weight: weight || 5,
+          gender: gender || 'Male',
+          color: color || 'Mixed'
+        });
+      }
+
+      // Handle images nếu có
+      if (req.files && req.files.length > 0 && this.imageModel) {
+        const imagePromises = req.files.map(file => {
+          const imageData = {
+            url: file.path,
+            is_primary: false,
+            [this.getImageForeignKey()]: savedEntity._id
+          };
+          return new this.imageModel(imageData).save();
+        });
+
+        const savedImages = await Promise.all(imagePromises);
+        
+        if (savedImages.length > 0) {
+          savedImages[0].is_primary = true;
+          await savedImages[0].save();
+        }
+      }
+
+      // Populate và trả về kết quả
+      const populatedEntity = await this.model.findById(savedEntity._id)
+        .populate('breed_id', 'name description')
+        // .populate('user_id', 'username email');
+
+      res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: `${this.getEntityName()} created successfully`,
+        data: populatedEntity
+      });
+
+    } catch (error) {
+      console.error(`Create ${this.getEntityName()} error:`, error);
+      
+      if (error.code === 11000) {
+        res.status(409).json({
           success: false,
-          statusCode: 400,
-          message: `${field} is required`,
+          statusCode: 409,
+          message: `${this.getEntityName()} already exists`,
+          data: null
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          statusCode: 500,
+          message: 'Internal server error',
           data: null
         });
       }
     }
+  }
+  
+async getRelatedItems(req, res) {
+    try {
+      const { id: petId } = req.params;
+      const { limit = 8 } = req.query;
 
-    // Tạo pet object
-    const petData = {
-      ...req.body,
-      // user_id: req.user.userId
-    };
+      console.log('🔍 Finding related items for pet:', petId);
 
-    // Tạo pet
-    const newEntity = new this.model(petData);
-    const savedEntity = await newEntity.save();
+      // 1️⃣ Lấy thông tin thú cưng hiện tại
+      const currentPet = await Pet.findById(petId)
+        .populate('breed_id')
+        .lean();
 
-    // 🆕 Tự động tạo default variant
-    if (age || weight || gender || color) {
-      await this.createDefaultVariants(savedEntity._id, {
-        age: age || 1,
-        weight: weight || 5,
-        gender: gender || 'Male',
-        color: color || 'Mixed'
-      });
-    }
-
-    // Handle images nếu có
-    if (req.files && req.files.length > 0 && this.imageModel) {
-      const imagePromises = req.files.map(file => {
-        const imageData = {
-          url: file.path,
-          is_primary: false,
-          [this.getImageForeignKey()]: savedEntity._id
-        };
-        return new this.imageModel(imageData).save();
-      });
-
-      const savedImages = await Promise.all(imagePromises);
-      
-      if (savedImages.length > 0) {
-        savedImages[0].is_primary = true;
-        await savedImages[0].save();
+      if (!currentPet) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Không tìm thấy thú cưng',
+          data: null
+        });
       }
-    }
 
-    // Populate và trả về kết quả
-    const populatedEntity = await this.model.findById(savedEntity._id)
-      .populate('breed_id', 'name description')
-      // .populate('user_id', 'username email');
+      const relatedItems = [];
 
-    res.status(201).json({
-      success: true,
-      statusCode: 201,
-      message: `${this.getEntityName()} created successfully`,
-      data: populatedEntity
-    });
+      // 2️⃣ Lấy thú cưng cùng breed (ưu tiên cao nhất)
+      const sameBreedPets = await Pet.find({
+        breed_id: currentPet.breed_id?._id,
+        _id: { $ne: petId },
+        status: 'available'
+      })
+      .populate('breed_id')
+      .limit(4)
+      .lean();
 
-  } catch (error) {
-    console.error(`Create ${this.getEntityName()} error:`, error);
-    
-    if (error.code === 11000) {
-      res.status(409).json({
-        success: false,
-        statusCode: 409,
-        message: `${this.getEntityName()} already exists`,
-        data: null
+      // Thêm ảnh và đánh dấu loại cho pets cùng breed
+      for (let pet of sameBreedPets) {
+        pet.images = await this.imageModel.find({ pet_id: pet._id })
+          .select('url is_primary')
+          .lean();
+        pet.itemType = 'pet';
+        pet.relationshipType = 'same-breed';
+      }
+
+      relatedItems.push(...sameBreedPets);
+
+      // 3️⃣ Tìm sản phẩm phù hợp với loài thú cưng
+      // ✅ FIX: Gọi helper method thay vì truyền req object
+      const relatedProducts = await this._findProductsForPetTypeHelper(
+        currentPet.type, 
+        Math.min(4, limit - relatedItems.length)
+      );
+      
+      relatedItems.push(...relatedProducts);
+
+      // 5️⃣ Trả về kết quả
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        data: {
+          relatedItems: relatedItems.slice(0, limit),
+          totalCount: relatedItems.length,
+          currentPet: {
+            id: currentPet._id,
+            name: currentPet.name,
+            type: currentPet.type,
+            breed: currentPet.breed_id?.name
+          },
+          breakdown: {
+            sameBreed: sameBreedPets.length,
+            relatedProducts: relatedProducts.length,
+            sameCategoryPets: Math.max(0, relatedItems.length - sameBreedPets.length - relatedProducts.length)
+          }
+        },
+        message: `Tìm thấy ${relatedItems.length} items liên quan cho ${currentPet.name}`
       });
-    } else {
+
+    } catch (error) {
+      console.error('❌ Error in getRelatedItems for pet:', error);
       res.status(500).json({
         success: false,
         statusCode: 500,
-        message: 'Internal server error',
+        message: 'Lỗi server khi lấy items liên quan',
+        data: null,
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * 🔧 HELPER: Tìm sản phẩm phù hợp với loài thú cưng (Internal helper)
+   */
+  async _findProductsForPetTypeHelper(petType, limit = 4) {
+    try {
+      // ✅ FIX: Kiểm tra petType đúng cách
+      if (!petType || typeof petType !== 'string') {
+        console.error('Invalid petType:', petType);
+        return [];
+      }
+
+      // Mapping thông minh pet type với keywords sản phẩm
+      const productKeywords = {
+        'chó': ['dog', 'chó', 'cún', 'thức ăn chó', 'đồ chó', 'phụ kiện chó', 'xương', 'bánh thưởng chó'],
+        'mèo': ['cat', 'mèo', 'meo', 'thức ăn mèo', 'đồ mèo', 'phụ kiện mèo', 'cát vệ sinh', 'cần câu mèo'],
+        'chim': ['bird', 'chim', 'thức ăn chim', 'lồng chim', 'đồ chim', 'hạt chim', 'vitamin chim'],
+        'cá': ['fish', 'cá', 'thức ăn cá', 'bể cá', 'đồ cá', 'máy sục khí', 'phụ kiện bể cá'],
+        'hamster': ['hamster', 'chuột', 'thức ăn hamster', 'lồng hamster', 'đồ hamster'],
+        'thỏ': ['rabbit', 'thỏ', 'thức ăn thỏ', 'cỏ khô', 'đồ thỏ', 'lồng thỏ']
+      };
+
+      const keywords = productKeywords[petType.toLowerCase()] || [petType];
+      const regexPattern = keywords.join('|');
+      
+      const products = await Product.find({
+        $or: [
+          { name: { $regex: regexPattern, $options: 'i' } },
+          { description: { $regex: regexPattern, $options: 'i' } }
+        ],
+        status: 'active'
+      })
+      .populate('category_id')
+      .limit(limit)
+      .lean();
+
+      // Thêm images và metadata cho products
+      for (let product of products) {
+        product.images = await ProductImage.find({ product_id: product._id })
+          .select('url is_primary')
+          .lean();
+        product.itemType = 'product';
+        product.relationshipType = 'pet-compatible';
+        product.compatibleWithPetType = petType;
+      }
+
+      console.log(`✅ Found ${products.length} products for pet type: ${petType}`);
+      return products;
+
+    } catch (error) {
+      console.error('❌ Error in _findProductsForPetTypeHelper:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 🆕 PUBLIC API: Route handler để tìm products cho pet type
+   * Route: GET /api/pets/products-for/:petType
+   */
+  async findProductsForPetType(req, res) {
+    try {
+      const { petType } = req.params;
+      const { limit = 12 } = req.query;
+
+      console.log('🔍 Finding products for pet type:', petType);
+
+      // ✅ FIX: Gọi helper method với đúng tham số
+      const products = await this._findProductsForPetTypeHelper(
+        decodeURIComponent(petType), // Decode URL encoding (mèo -> mèo)
+        parseInt(limit)
+      );
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: `Tìm thấy ${products.length} sản phẩm cho ${petType}`,
+        data: {
+          products,
+          petType: decodeURIComponent(petType),
+          totalCount: products.length
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error in findProductsForPetType API:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi server khi tìm sản phẩm',
+        data: null,
+        error: error.message
+      });
+    }
+  }
+
+
+  /**
+   * 🎯 API TƯƠNG TỰ: Tìm thú cưng tương tự (nâng cấp từ getSimilarBreeds)
+   */
+  async getSimilarPetsAdvanced(req, res) {
+    try {
+      const { petId } = req.params;
+      const { limit = 6, includeCrossCategory = false } = req.query;
+
+      const currentPet = await Pet.findById(petId)
+        .populate('breed_id')
+        .lean();
+
+      if (!currentPet) {
+        return res.status(404).json({
+          success: false,
+          statusCode: 404,
+          message: 'Không tìm thấy thú cưng',
+          data: null
+        });
+      }
+
+      const similarityScores = [];
+
+      // Tìm tất cả pets khác
+      const otherPets = await Pet.find({
+        _id: { $ne: petId },
+        status: 'available'
+      })
+      .populate('breed_id')
+      .lean();
+
+      // Tính điểm tương tự cho từng pet
+      for (let pet of otherPets) {
+        let score = 0;
+
+        // Cùng breed = 100 điểm
+        if (pet.breed_id?._id?.toString() === currentPet.breed_id?._id?.toString()) {
+          score += 100;
+        }
+        
+        // Cùng category = 80 điểm
+        else if (pet.breed_id?.category_id?.toString() === currentPet.breed_id?.category_id?.toString()) {
+          score += 80;
+        }
+
+        // Cùng type = 60 điểm
+        if (pet.type === currentPet.type) {
+          score += 60;
+        }
+
+        // Khoảng giá tương tự = 40 điểm
+        const priceDiff = Math.abs(pet.price - currentPet.price);
+        const priceRatio = priceDiff / currentPet.price;
+        if (priceRatio <= 0.3) score += 40; // Chênh lệch <= 30%
+        else if (priceRatio <= 0.5) score += 20; // Chênh lệch <= 50%
+
+        // Tuổi tương tự = 20 điểm
+        if (pet.age && currentPet.age) {
+          const ageDiff = Math.abs(pet.age - currentPet.age);
+          if (ageDiff <= 3) score += 20;
+          else if (ageDiff <= 6) score += 10;
+        }
+
+        // Cùng giới tính = 10 điểm
+        if (pet.gender === currentPet.gender) {
+          score += 10;
+        }
+
+        if (score > 0) {
+          similarityScores.push({ pet, score });
+        }
+      }
+
+      // Sắp xếp theo điểm tương tự
+      similarityScores.sort((a, b) => b.score - a.score);
+      
+      const topSimilar = similarityScores.slice(0, limit);
+
+      // Thêm ảnh cho pets tương tự
+      for (let item of topSimilar) {
+        item.pet.images = await this.imageModel.find({ pet_id: item.pet._id })
+          .select('url is_primary')
+          .lean();
+        item.pet.itemType = 'pet';
+        item.pet.similarityScore = item.score;
+      }
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        data: {
+          similarPets: topSimilar.map(item => ({
+            ...item.pet,
+            similarityScore: item.score
+          })),
+          totalAnalyzed: otherPets.length,
+          currentPet: {
+            id: currentPet._id,
+            name: currentPet.name,
+            type: currentPet.type,
+            breed: currentPet.breed_id?.name,
+            price: currentPet.price
+          }
+        },
+        message: `Tìm thấy ${topSimilar.length} pets tương tự`
+      });
+
+    } catch (error) {
+      console.error('❌ Error in getSimilarPetsAdvanced:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi server khi tìm pets tương tự',
         data: null
       });
     }
   }
-}
 }
 
 const petController = new PetController();
@@ -2427,5 +2729,9 @@ module.exports = {
   getBreedPopularityRanking: petController.getBreedPopularityRanking.bind(petController),
   compareBreedPrices: petController.compareBreedPrices.bind(petController),
   getBreedSearchSuggestions: petController.getBreedSearchSuggestions.bind(petController),
-  getPetById: petController.getPetById.bind(petController) // New export
+  getPetById: petController.getPetById.bind(petController),
+  getRelatedItems: petController.getRelatedItems.bind(petController),
+  getSimilarPetsAdvanced: petController.getSimilarPetsAdvanced.bind(petController),
+  findProductsForPetType: petController.findProductsForPetType.bind(petController),
+  
 };

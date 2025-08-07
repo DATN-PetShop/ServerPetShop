@@ -27,7 +27,10 @@ const {
   getBreedPopularityRanking,
   compareBreedPrices,
   getBreedSearchSuggestions,
-  getPetById
+  getPetById,
+  getRelatedItems,          
+  getSimilarPetsAdvanced,
+findProductsForPetType  
 } = require('../controllers/petController');
 
 // ==========================================
@@ -54,6 +57,11 @@ router.get('/breeds/popularity', getBreedPopularityRanking);
 router.post('/breeds/compare-prices', compareBreedPrices);
 router.get('/category/:categoryId', getPetsByCategory);
 
+// 🔥 ROUTES MỚI - LOGIC THÔNG MINH
+router.get('/:id/related', getRelatedItems);                    
+router.get('/:id/similar-advanced', getSimilarPetsAdvanced);
+router.get('/products-for/:petType', findProductsForPetType);
+
 // Public routes
 router.get('/', getAllPetsPublic);                      
 router.get('/:id', getPetById);                         
@@ -74,9 +82,5 @@ router.post('/', upload.array('images', 5), createPet);
 router.put('/:id', upload.array('images', 5), updatePet);
 router.delete('/:id', deletePet);
 
-// Sau khi test xong, restore lại:
-// router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createPet);
-// router.put('/:id', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), updatePet);
-// router.delete('/:id', auth, requireRoles(['Admin']), deletePet);
 
 module.exports = router;

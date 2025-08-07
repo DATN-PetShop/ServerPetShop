@@ -506,7 +506,7 @@ async getAvailableStaff(req, res) {
 
         // Lấy tất cả staff active
         const allStaff = await User.find({
-            role: { $in: ['Staff', 'Admin'] },
+            role: { $in: ['Staff'] },
             status: 'active' // Sửa từ is_active: true thành status: 'active'
         }).select('username email full_name');
 

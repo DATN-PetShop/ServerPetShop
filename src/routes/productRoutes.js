@@ -11,7 +11,10 @@ const {
   searchProducts,
   getFilterOptions,
   getProductById,
+  getRelatedItems
 } = require('../controllers/productController');
+
+router.get('/:id/related', getRelatedItems);
 
 // ✅ QUAN TRỌNG: Đặt route cụ thể TRƯỚC route động /:id
 router.get('/search', searchProducts);           // ✅ Đặt trước /:id
