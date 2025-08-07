@@ -34,7 +34,7 @@ const server = http.createServer(app);
 
 const io = socketIo(server, {
   cors: {
-    origin: "*", // Cho phép tất cả kết nối
+    origin: "*", 
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -81,15 +81,17 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/order_items', orderItemRoutes);
 app.use('/', vnpayRoutes);
 app.use('/api/favourites', favouriteRoutes);
-app.use('/api/pet-variants', petVariantRoutes); // 
-app.use('/api/statistics', statisticsRoutes); // Thống kê
-app.use('/api/push-notifications', pushNotificationRoutes); // Push notifications
+app.use('/api/pet-variants', petVariantRoutes); 
+app.use('/api/statistics', statisticsRoutes); 
+app.use('/api/push-notifications', pushNotificationRoutes); 
+app.use('/api/appointments', appointmentRoutes);
+app.use('/api/care-services', careServiceRoutes); 
+
 
 app.get('/', (req, res) => {
   res.send('PetShop Server is running');
 });
-app.use('/api/appointments', appointmentRoutes);//Quản lý lịch hẹn
-app.use('/api/care-services', careServiceRoutes); //Quản lý dịch vụ
+
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
