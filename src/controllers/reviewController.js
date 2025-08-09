@@ -636,8 +636,8 @@ async getReviewsByPet(req, res) {
       const totalPages = Math.ceil(totalReviews / limit);
       
       // Tính rating statistics
-      const ratingStats = await this.model.aggregate([
-        { $match: { product_id: mongoose.Types.ObjectId(productId) } },
+     const ratingStats = await this.model.aggregate([
+        { $match: { pet_id: new mongoose.Types.ObjectId(productId) } }, // ✅ Sử dụng 'new'
         {
           $group: {
             _id: null,
