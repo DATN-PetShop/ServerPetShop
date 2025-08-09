@@ -5,8 +5,8 @@ const User = require('../models/User');
 const { sendWelcomeNotification } = require('../services/notificationService');
 
 // Generate JWT Token
-const generateToken = (userId, role) => {
-  return jwt.sign({ userId, role,  }, process.env.JWT_SECRET, { expiresIn: '7d' });
+const generateToken = (userId, role, status) => {
+  return jwt.sign({ userId, role, status }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
 // @desc    Register a new user
@@ -56,7 +56,7 @@ const registerUser = async (req, res) => {
     const savedUser = await user.save();
 
     // Generate token
-    const token = generateToken(savedUser._id, savedUser.role);
+    const token = generateToken(savedUser._id, savedUser.role, savedUser.status);
 
     // Gửi notification chào mừng cho user mới (không blocking)
     setTimeout(async () => {
@@ -157,7 +157,7 @@ const loginUser = async (req, res) => {
     }
 
     // Generate token
-    const token = generateToken(user._id, user.role);
+    const token = generateToken(user._id, user.role, user.status);
 
     res.status(200).json({
       success: true,
@@ -706,6 +706,16 @@ const banUser = async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
+    
+    // Validate reason
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Reason is required to ban a user',
+        data: null
+      });
+    }
     
     const user = await User.findById(id);
     if (!user) {
