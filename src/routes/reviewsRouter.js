@@ -11,7 +11,8 @@ const {
   getReviewsByPet,
   updateReview,
   deleteReview,
-  createReviewFromOrderItem
+  createReviewFromOrderItem,
+  getReviewsByProduct
 } = require('../controllers/reviewController');
 
 // ===== PUBLIC ROUTES =====
@@ -33,6 +34,7 @@ router.get('/:id', auth, getReviewById);
 
 // Lấy reviews theo pet ID (authenticated users)
 router.get('/pet/:petId', auth, getReviewsByPet);
+router.get('/product/:productId',auth, getReviewsByProduct);
 
 // ===== USER ROUTES (Authenticated Users) =====
 // Tạo review mới với ảnh (User only - không cho Admin)

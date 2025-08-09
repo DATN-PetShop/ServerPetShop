@@ -3,6 +3,7 @@ const Review = require('../models/Review');
 const ReviewImage = require('../models/ReviewImage');
 const BaseCrudController = require('./baseCrudController');
 const { cloudinary } = require('../config/cloudinaryConfig');
+const mongoose = require('mongoose');
 
 class ReviewController extends BaseCrudController {
   constructor() {
@@ -270,13 +271,39 @@ class ReviewController extends BaseCrudController {
   }
 
   // Lấy đánh giá theo Pet ID
-  async getReviewsByPet(req, res) {
+// ✅ UPDATED: Lấy đánh giá theo Pet ID với pagination và stats
+async getReviewsByPet(req, res) {
     try {
       const { petId } = req.params;
-      
-      const reviews = await this.model.find({ pet_id: petId })
-        .populate('user_id', 'username email')
-        .populate('product_id', 'name price')
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const rating = req.query.rating; // Filter theo rating (1-5)
+      const skip = (page - 1) * limit;
+
+      console.log('🔍 Getting reviews for pet:', petId);
+
+      // ✅ Kiểm tra petId có hợp lệ không
+      if (!mongoose.Types.ObjectId.isValid(petId)) {
+        return res.status(400).json({
+          success: false,
+          statusCode: 400,
+          message: 'Pet ID không hợp lệ',
+          data: null
+        });
+      }
+
+      // Build query
+      let query = { pet_id: petId };
+      if (rating) {
+        query.rating = parseInt(rating);
+      }
+
+      const reviews = await this.model.find(query)
+        .populate('user_id', 'username email avatar')
+        .populate('product_id', 'name price') // Trong trường hợp pet được mua kèm product
+        .sort({ created_at: -1 }) // Sắp xếp theo thời gian mới nhất
+        .skip(skip)
+        .limit(limit)
         .lean();
 
       // Thêm ảnh cho mỗi review
@@ -289,11 +316,59 @@ class ReviewController extends BaseCrudController {
         }
       }
 
+      // Đếm tổng số reviews và tính trung bình rating
+      const totalReviews = await this.model.countDocuments(query);
+      const totalPages = Math.ceil(totalReviews / limit);
+      
+      // ✅ FIXED: Tính rating statistics với ObjectId đúng cách
+      const ratingStats = await this.model.aggregate([
+        { $match: { pet_id: new mongoose.Types.ObjectId(petId) } }, // ✅ Sử dụng 'new'
+        {
+          $group: {
+            _id: null,
+            avgRating: { $avg: '$rating' },
+            totalReviews: { $sum: 1 },
+            ratings: {
+              $push: '$rating'
+            }
+          }
+        }
+      ]);
+
+      // Tính distribution của từng rating
+      const ratingDistribution = {};
+      for (let i = 1; i <= 5; i++) {
+        const count = await this.model.countDocuments({ 
+          pet_id: petId, 
+          rating: i 
+        });
+        ratingDistribution[`star${i}`] = count;
+      }
+
+      const stats = ratingStats.length > 0 ? {
+        avgRating: Math.round(ratingStats[0].avgRating * 10) / 10, // Làm tròn 1 chữ số
+        totalReviews: ratingStats[0].totalReviews,
+        distribution: ratingDistribution
+      } : {
+        avgRating: 0,
+        totalReviews: 0,
+        distribution: {}
+      };
+
       res.status(200).json({
         success: true,
         statusCode: 200,
         message: 'Lấy đánh giá theo pet thành công',
-        data: reviews
+        data: {
+          reviews,
+          pagination: {
+            currentPage: page,
+            totalPages,
+            totalReviews,
+            hasMore: page < totalPages
+          },
+          stats
+        }
       });
     } catch (error) {
       console.error('Lỗi khi lấy đánh giá theo pet:', error);
@@ -524,6 +599,102 @@ class ReviewController extends BaseCrudController {
       });
     }
   }
+
+    async getReviewsByProduct(req, res) {
+    try {
+      const { productId } = req.params;
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const rating = req.query.rating; // Filter theo rating (1-5)
+      const skip = (page - 1) * limit;
+
+      // Build query
+      let query = { product_id: productId };
+      if (rating) {
+        query.rating = parseInt(rating);
+      }
+
+      const reviews = await this.model.find(query)
+        .populate('user_id', 'username email avatar')
+        .sort({ created_at: -1 }) // Sắp xếp theo thời gian mới nhất
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      // Thêm ảnh cho mỗi review
+      if (this.imageModel) {
+        for (let review of reviews) {
+          const images = await this.imageModel.find({ 
+            [this.getImageForeignKey()]: review._id 
+          }).lean();
+          review.images = images;
+        }
+      }
+
+      // Đếm tổng số reviews và tính trung bình rating
+      const totalReviews = await this.model.countDocuments(query);
+      const totalPages = Math.ceil(totalReviews / limit);
+      
+      // Tính rating statistics
+      const ratingStats = await this.model.aggregate([
+        { $match: { product_id: mongoose.Types.ObjectId(productId) } },
+        {
+          $group: {
+            _id: null,
+            avgRating: { $avg: '$rating' },
+            totalReviews: { $sum: 1 },
+            ratings: {
+              $push: '$rating'
+            }
+          }
+        }
+      ]);
+
+      // Tính distribution của từng rating
+      const ratingDistribution = {};
+      for (let i = 1; i <= 5; i++) {
+        const count = await this.model.countDocuments({ 
+          product_id: productId, 
+          rating: i 
+        });
+        ratingDistribution[`star${i}`] = count;
+      }
+
+      const stats = ratingStats.length > 0 ? {
+        avgRating: Math.round(ratingStats[0].avgRating * 10) / 10, // Làm tròn 1 chữ số
+        totalReviews: ratingStats[0].totalReviews,
+        distribution: ratingDistribution
+      } : {
+        avgRating: 0,
+        totalReviews: 0,
+        distribution: {}
+      };
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Lấy đánh giá theo sản phẩm thành công',
+        data: {
+          reviews,
+          pagination: {
+            currentPage: page,
+            totalPages,
+            totalReviews,
+            hasMore: page < totalPages
+          },
+          stats
+        }
+      });
+    } catch (error) {
+      console.error('Lỗi khi lấy đánh giá theo sản phẩm:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi máy chủ nội bộ',
+        data: null
+      });
+    }
+  }
 }
 
 const reviewController = new ReviewController();
@@ -536,5 +707,5 @@ module.exports = {
   updateReview: reviewController.update.bind(reviewController),
   deleteReview: reviewController.delete.bind(reviewController),
   createReviewFromOrderItem: reviewController.createReviewFromOrderItem.bind(reviewController), // ✅ Thêm method mới
-
+  getReviewsByProduct: reviewController.getReviewsByProduct.bind(reviewController), // ✅ Thêm method mới
 };
