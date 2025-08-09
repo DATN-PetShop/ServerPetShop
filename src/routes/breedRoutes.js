@@ -31,7 +31,7 @@ router.get('/', getAllBreeds);
 router.get('/:id', auth, getBreedById);
 
 // Lấy breeds theo category (authenticated users)
-router.get('/category/:categoryId', auth, getBreedsByCategory);
+router.get('/category/:categoryId', getBreedsByCategory);
 
 // ===== ADMIN/STAFF ROUTES =====
 // Tạo breed mới (Admin/Staff only)
@@ -41,9 +41,9 @@ router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 
 router.put('/:id', auth, requireRoles(['Admin', 'Staff']),upload.array('images', 5),  updateBreed);
 
 // ai cung xem dc
-router.get('/', auth, getAllBreeds); 
-router.get('/:id', auth, getBreedById);
-router.get('/category/:categoryId', auth, getBreedsByCategory); 
+router.get('/',  getAllBreeds); 
+router.get('/:id', getBreedById);
+router.get('/category/:categoryId', getBreedsByCategory); 
 
 // admin nhan vien - Thêm upload middleware để xử lý images
 router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createBreed);

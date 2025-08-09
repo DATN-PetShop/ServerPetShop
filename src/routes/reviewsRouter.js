@@ -33,8 +33,8 @@ router.get('/', auth, getAllReviews);
 router.get('/:id', auth, getReviewById);
 
 // Lấy reviews theo pet ID (authenticated users)
-router.get('/pet/:petId', auth, getReviewsByPet);
-router.get('/product/:productId',auth, getReviewsByProduct);
+router.get('/pet/:petId', getReviewsByPet);
+router.get('/product/:productId', getReviewsByProduct);
 
 // ===== USER ROUTES (Authenticated Users) =====
 // Tạo review mới với ảnh (User only - không cho Admin)
