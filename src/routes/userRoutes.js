@@ -42,7 +42,7 @@ router.get('/admin', auth, requireRoles(['Admin']), adminRoute);
 router.get('/staff', auth, requireRoles(['Admin', 'Staff']), staffRoute);
 
 router.get('/', auth, requireRoles(['Admin']), getAllUsers);
-router.get('/staff-only', auth, requireRoles(['Admin']), getStaffUsers); 
+router.get('/staff-only', customersLimiter, auth, requireRoles(['Admin']), getStaffUsers); 
 router.get('/customers', customersLimiter, auth, requireRoles(['Admin', 'Staff']), getCustomerUsers);    
 router.patch('/:id/status', auth, requireRoles(['Admin']), updateCustomerStatus); 
 router.patch('/:id/ban', auth, requireRoles(['Admin', 'Staff']), banUser);           
