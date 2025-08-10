@@ -10,6 +10,288 @@ const Image = require('../models/ImagePet');
 // ✅ THÊM IMPORT REVIEW MODEL
 const Review = require('../models/Review');
 
+const searchOrderItems = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { 
+      query, 
+      keyword,  // Hỗ trợ cả query và keyword
+      page = 1, 
+      limit = 10,
+      status    // Filter theo trạng thái đơn hàng
+    } = req.query;
+
+    const searchKeyword = query || keyword || '';
+    
+    console.log('🔍 Search order items request:', {
+      userId,
+      searchKeyword,
+      page,
+      limit,
+      status
+    });
+
+    if (!searchKeyword.trim()) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Search keyword is required'
+      });
+    }
+
+    // Bước 1: Tìm orders của user với filter status (nếu có)
+    const orderFilter = { user_id: userId };
+    if (status && status !== 'all') {
+      orderFilter.status = status;
+    }
+
+    const orders = await Order.find(orderFilter).select('_id').lean();
+    const orderIds = orders.map(order => order._id);
+
+    if (orderIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'No order items found',
+        data: [],
+        pagination: {
+          currentPage: Number(page),
+          totalPages: 0,
+          totalCount: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+          limit: Number(limit)
+        }
+      });
+    }
+
+    // Bước 2: Tạo search conditions cho order items
+    const searchConditions = [];
+
+    // Tìm kiếm theo Order ID (6 ký tự cuối)
+    if (searchKeyword.length >= 3) {
+      // Tìm orders có _id chứa keyword (tìm trong 6 ký tự cuối)
+      const matchingOrders = orders.filter(order => 
+        order._id.toString().slice(-6).toLowerCase().includes(searchKeyword.toLowerCase())
+      );
+      
+      if (matchingOrders.length > 0) {
+        searchConditions.push({
+          order_id: { $in: matchingOrders.map(o => o._id) }
+        });
+      }
+    }
+
+    // Tìm kiếm trong Pet (tên pet, breed)
+    try {
+      const petSearchConditions = [
+        { name: { $regex: searchKeyword, $options: 'i' } }
+      ];
+
+      // Tìm breed có tên chứa keyword
+      const Breed = require('../models/Breed');
+      const matchingBreeds = await Breed.find({
+        name: { $regex: searchKeyword, $options: 'i' }
+      }).select('_id').lean();
+
+      if (matchingBreeds.length > 0) {
+        petSearchConditions.push({
+          breed_id: { $in: matchingBreeds.map(b => b._id) }
+        });
+      }
+
+      const matchingPets = await Pet.find({
+        $or: petSearchConditions
+      }).select('_id').lean();
+
+      if (matchingPets.length > 0) {
+        const petIds = matchingPets.map(p => p._id);
+        
+        // Tìm order items có pet_id trực tiếp
+        searchConditions.push({ pet_id: { $in: petIds } });
+        
+        // Tìm variants của pets này
+        const matchingVariants = await PetVariant.find({
+          pet_id: { $in: petIds }
+        }).select('_id').lean();
+
+        if (matchingVariants.length > 0) {
+          searchConditions.push({ 
+            variant_id: { $in: matchingVariants.map(v => v._id) } 
+          });
+        }
+      }
+    } catch (petSearchError) {
+      console.error('Pet search error:', petSearchError);
+    }
+
+    // Tìm kiếm trong Product
+    try {
+      const matchingProducts = await Product.find({
+        $or: [
+          { name: { $regex: searchKeyword, $options: 'i' } },
+          { description: { $regex: searchKeyword, $options: 'i' } }
+        ]
+      }).select('_id').lean();
+
+      if (matchingProducts.length > 0) {
+        searchConditions.push({ 
+          product_id: { $in: matchingProducts.map(p => p._id) } 
+        });
+      }
+    } catch (productSearchError) {
+      console.error('Product search error:', productSearchError);
+    }
+
+    // Nếu không có điều kiện tìm kiếm nào, trả về empty
+    if (searchConditions.length === 0) {
+      return res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'No matching order items found',
+        data: [],
+        pagination: {
+          currentPage: Number(page),
+          totalPages: 0,
+          totalCount: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+          limit: Number(limit)
+        }
+      });
+    }
+
+    // Bước 3: Tìm order items với search conditions
+    const orderItemFilter = {
+      order_id: { $in: orderIds },
+      $or: searchConditions
+    };
+
+    console.log('📋 Order item search filter:', JSON.stringify(orderItemFilter, null, 2));
+
+    // Đếm tổng số items
+    const totalCount = await OrderItem.countDocuments(orderItemFilter);
+
+    // Phân trang
+    const skip = (Number(page) - 1) * Number(limit);
+    const totalPages = Math.ceil(totalCount / Number(limit));
+
+    // Tìm order items với populate đầy đủ
+    const orderItems = await OrderItem.find(orderItemFilter)
+      .populate('pet_id', 'name price type breed_id')
+      .populate('product_id', 'name price description')
+      .populate({
+        path: 'variant_id',
+        populate: {
+          path: 'pet_id',
+          select: 'name price type breed_id',
+          populate: {
+            path: 'breed_id',
+            select: 'name'
+          }
+        }
+      })
+      .populate('addresses_id', 'name phone ward district province')
+      .populate('order_id', 'total_amount status payment_method created_at')
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    console.log(`✅ Found ${orderItems.length} matching order items`);
+
+    // Bước 4: Populate images cho mỗi item (giống logic getMyOrderItems)
+    const orderItemsWithImages = await Promise.all(
+      orderItems.map(async (item) => {
+        let images = [];
+        let itemInfo = null;
+        let itemType = 'unknown';
+
+        try {
+          if (item.variant_id) {
+            // Variant item - structured format
+            itemType = 'variant';
+            itemInfo = {
+              _id: item.variant_id._id,
+              name: item.variant_id.pet_id?.name,
+              variant: {
+                color: item.variant_id.color,
+                weight: item.variant_id.weight,
+                gender: item.variant_id.gender,
+                age: item.variant_id.age
+              }
+            };
+            
+            if (item.variant_id.pet_id) {
+              images = await Image.find({ pet_id: item.variant_id.pet_id._id }).lean();
+            }
+          } else if (item.pet_id) {
+            // Direct pet item - structured format
+            itemType = 'pet';
+            itemInfo = {
+              _id: item.pet_id._id,
+              name: item.pet_id.name,
+              breed_id: item.pet_id.breed_id,
+              gender: item.pet_id.gender,
+              age: item.pet_id.age
+            };
+            images = await Image.find({ pet_id: item.pet_id._id }).lean();
+          } else if (item.product_id) {
+            // Product item - structured format
+            itemType = 'product';
+            itemInfo = {
+              _id: item.product_id._id,
+              name: item.product_id.name,
+              description: item.product_id.description
+            };
+            images = await ProductImage.find({ product_id: item.product_id._id }).lean();
+          }
+        } catch (imageError) {
+          console.error('Error loading images for search:', imageError);
+          images = [];
+        }
+
+        return {
+          ...item,
+          images,
+          item_info: itemInfo,
+          item_type: itemType
+        };
+      })
+    );
+
+    // Bước 5: Trả về kết quả
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: `Found ${totalCount} matching order items`,
+      data: orderItemsWithImages,
+      pagination: {
+        currentPage: Number(page),
+        totalPages,
+        totalCount,
+        hasNextPage: Number(page) < totalPages,
+        hasPrevPage: Number(page) > 1,
+        limit: Number(limit)
+      },
+      searchInfo: {
+        keyword: searchKeyword,
+        searchConditionsCount: searchConditions.length,
+        statusFilter: status || 'all'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Search order items error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 const createOrderItem = async (req, res) => {
   try {
     const { quantity, unit_price, pet_id, product_id, variant_id, order_id, addresses_id } = req.body;
@@ -584,6 +866,7 @@ module.exports = {
   getOrderItemsByOrderId,
   updateOrderItem,
   deleteOrderItem,
-  getMyOrderItemsWithReviewStatus, // ✅ Export hàm mới
-  checkOrderItemReviewStatus,       // ✅ Export hàm mới
+  getMyOrderItemsWithReviewStatus,
+  checkOrderItemReviewStatus, 
+  searchOrderItems
 };

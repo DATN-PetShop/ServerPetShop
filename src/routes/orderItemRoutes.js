@@ -9,11 +9,13 @@ const {
   updateOrderItem,
   deleteOrderItem,
   getOrderItemsByOrderId,
-   getMyOrderItemsWithReviewStatus, // ✅ Import hàm mới
-  checkOrderItemReviewStatus,       // ✅ Import hàm mới
+   getMyOrderItemsWithReviewStatus, 
+  checkOrderItemReviewStatus, 
+  searchOrderItems
 } = require('../controllers/orderItemsController');
 const requireRole = require('../middleware/requireRole');
 
+router.get('/search', auth, searchOrderItems);
 // ✅ Lấy danh sách order items với thông tin review status (version mới)
 router.get('/with-review-status', auth, getMyOrderItemsWithReviewStatus);
 // ✅ Kiểm tra trạng thái đánh giá của một order item cụ thể
