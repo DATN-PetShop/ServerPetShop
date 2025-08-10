@@ -3,6 +3,7 @@ const Category = require('../models/Category');
 const BreedImage = require('../models/BreedImage');
 const BaseCrudController = require('./baseCrudController');
 const { cloudinary } = require('../config/cloudinaryConfig');
+const mongoose = require('mongoose');
 
 class BreedController extends BaseCrudController {
   constructor() {
@@ -28,8 +29,8 @@ class BreedController extends BaseCrudController {
       // Thêm images cho mỗi breed
       if (this.imageModel) {
         for (let breed of breeds) {
-          const images = await this.imageModel.find({ 
-            [this.getImageForeignKey()]: breed._id 
+          const images = await this.imageModel.find({
+            [this.getImageForeignKey()]: breed._id
           }).lean();
           breed.images = images;
         }
@@ -63,8 +64,8 @@ class BreedController extends BaseCrudController {
       // Thêm images cho mỗi breed
       if (this.imageModel) {
         for (let breed of breeds) {
-          const images = await this.imageModel.find({ 
-            [this.getImageForeignKey()]: breed._id 
+          const images = await this.imageModel.find({
+            [this.getImageForeignKey()]: breed._id
           }).lean();
           breed.images = images;
         }
@@ -132,8 +133,8 @@ class BreedController extends BaseCrudController {
         await this.imageModel.insertMany(imageDocs);
         
         // Attach images to response
-        const images = await this.imageModel.find({ 
-          [this.getImageForeignKey()]: savedEntity._id 
+        const images = await this.imageModel.find({
+          [this.getImageForeignKey()]: savedEntity._id
         }).lean();
         savedEntity.images = images;
       }
@@ -190,8 +191,8 @@ class BreedController extends BaseCrudController {
       // Handle image updates if present
       if (this.imageModel && req.files && req.files.length > 0) {
         // Delete old images from cloudinary
-        const oldImages = await this.imageModel.find({ 
-          [this.getImageForeignKey()]: updated._id 
+        const oldImages = await this.imageModel.find({
+          [this.getImageForeignKey()]: updated._id
         });
         
         if (oldImages.length > 0) {
@@ -207,8 +208,8 @@ class BreedController extends BaseCrudController {
         }
 
         // Delete old image records
-        await this.imageModel.deleteMany({ 
-          [this.getImageForeignKey()]: updated._id 
+        await this.imageModel.deleteMany({
+          [this.getImageForeignKey()]: updated._id
         });
 
         // Create new image records
@@ -223,8 +224,8 @@ class BreedController extends BaseCrudController {
 
       // Attach images to response
       if (this.imageModel) {
-        const images = await this.imageModel.find({ 
-          [this.getImageForeignKey()]: updated._id 
+        const images = await this.imageModel.find({
+          [this.getImageForeignKey()]: updated._id
         }).lean();
         updated.images = images;
       }
@@ -261,8 +262,8 @@ class BreedController extends BaseCrudController {
 
       // Delete associated images
       if (this.imageModel) {
-        const imagesToDelete = await this.imageModel.find({ 
-          [this.getImageForeignKey()]: deleted._id 
+        const imagesToDelete = await this.imageModel.find({
+          [this.getImageForeignKey()]: deleted._id
         });
         
         if (imagesToDelete.length > 0) {
@@ -277,8 +278,8 @@ class BreedController extends BaseCrudController {
           }
 
           // Delete image records
-          await this.imageModel.deleteMany({ 
-            [this.getImageForeignKey()]: deleted._id 
+          await this.imageModel.deleteMany({
+            [this.getImageForeignKey()]: deleted._id
           });
         }
       }
@@ -317,8 +318,8 @@ class BreedController extends BaseCrudController {
 
       // Attach images
       if (this.imageModel) {
-        const images = await this.imageModel.find({ 
-          [this.getImageForeignKey()]: breed._id 
+        const images = await this.imageModel.find({
+          [this.getImageForeignKey()]: breed._id
         }).lean();
         breed.images = images;
       }
@@ -339,8 +340,201 @@ class BreedController extends BaseCrudController {
       });
     }
   }
-}
+  // Tìm kiếm breed theo tên
+  async searchBreedsByName(req, res) {
+    try {
+      const {
+        keyword = '',          // Từ khóa tìm kiếm (tên breed)
+        categoryId,            // Lọc theo category (optional)
+        page = 1,              // Trang hiện tại
+        limit = 10,            // Số lượng breed mỗi trang
+        sortBy = 'name',       // Sắp xếp theo (name, created_at)
+        sortOrder = 'asc',     // Thứ tự sắp xếp (asc, desc)
+        includeStats = false,  // Có bao gồm thống kê pets không
+        includeImages = true   // Có bao gồm ảnh không
+      } = req.query;
 
+      console.log('🔍 Breed Search API called with:', {
+        keyword,
+        categoryId,
+        page,
+        limit
+      });
+
+      // Xây dựng query filter
+      const filter = {};
+
+      // Tìm kiếm theo keyword (tên hoặc mô tả)
+      if (keyword && keyword.trim()) {
+        filter.$or = [
+          { name: { $regex: keyword.trim(), $options: 'i' } },
+          { description: { $regex: keyword.trim(), $options: 'i' } }
+        ];
+      }
+
+      // Lọc theo category
+      if (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
+        filter.category_id = categoryId;
+      }
+
+      console.log('📋 Filter applied:', filter);
+
+      // Xây dựng sort object
+      const sort = {};
+      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+      // Tính toán pagination
+      const skip = (Number(page) - 1) * Number(limit);
+
+      // Thực hiện query
+      const breeds = await this.model
+        .find(filter)
+        .populate('category_id', 'name description')
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit))
+        .lean();
+
+      // Đếm tổng số breed
+      const totalCount = await this.model.countDocuments(filter);
+      const totalPages = Math.ceil(totalCount / Number(limit));
+      const hasNextPage = Number(page) < totalPages;
+      const hasPrevPage = Number(page) > 1;
+
+      // Populate images nếu cần
+      if (includeImages === 'true' && this.imageModel) {
+        for (let breed of breeds) {
+          const images = await this.imageModel
+            .find({ [this.getImageForeignKey()]: breed._id })
+            .lean();
+          breed.images = images;
+        }
+      }
+
+      // Thêm thống kê pets cho mỗi breed nếu cần
+      if (includeStats === 'true') {
+        const Pet = require('../models/Pet');
+        
+        for (let breed of breeds) {
+          // Đếm tổng số pets
+          const totalPets = await Pet.countDocuments({ breed_id: breed._id });
+          
+          // Đếm pets theo status
+          const availablePets = await Pet.countDocuments({
+            breed_id: breed._id,
+            status: 'available'
+          });
+          
+          const soldPets = await Pet.countDocuments({
+            breed_id: breed._id,
+            status: 'sold'
+          });
+
+          // Giá trung bình
+          const avgPriceResult = await Pet.aggregate([
+            { $match: { breed_id: breed._id } },
+            { $group: { _id: null, avgPrice: { $avg: '$price' } } }
+          ]);
+
+          breed.stats = {
+            totalPets,
+            availablePets,
+            soldPets,
+            avgPrice: avgPriceResult.length > 0 ? Math.round(avgPriceResult[0].avgPrice) : 0
+          };
+        }
+      }
+
+      console.log(`✅ Found ${breeds.length} breeds`);
+
+      // Response
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: keyword
+          ? `Search completed for "${keyword}"`
+          : 'All breeds retrieved successfully',
+        data: {
+          breeds,
+          pagination: {
+            currentPage: Number(page),
+            totalPages,
+            totalCount,
+            hasNextPage,
+            hasPrevPage,
+            limit: Number(limit)
+          },
+          searchInfo: {
+            keyword: keyword || '',
+            categoryId: categoryId || null,
+            resultsCount: breeds.length
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Breed search by name error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+  // Tìm kiếm có gợi ý breed theo tên
+  async getBreedSearchSuggestions(req, res) {
+    try {
+      const { keyword = '', limit = 5 } = req.query;
+
+      if (!keyword || keyword.trim().length < 2) {
+        return res.status(200).json({
+          success: true,
+          statusCode: 200,
+          message: 'Keyword too short for suggestions',
+          data: {
+            suggestions: [],
+            keyword: keyword || ''
+          }
+        });
+      }
+
+      // Tìm breed suggestions
+      const suggestions = await this.model
+        .find({
+          name: { $regex: keyword.trim(), $options: 'i' }
+        })
+        .select('name category_id')
+        .populate('category_id', 'name')
+        .limit(Number(limit))
+        .lean();
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Breed search suggestions retrieved successfully',
+        data: {
+          suggestions: suggestions.map(breed => ({
+            _id: breed._id,
+            name: breed.name,
+            category: breed.category_id?.name || 'Unknown'
+          })),
+          keyword,
+          totalSuggestions: suggestions.length
+        }
+      });
+
+    } catch (error) {
+      console.error('Get breed search suggestions error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+}
 const breedController = new BreedController();
 
 module.exports = {
@@ -349,5 +543,7 @@ module.exports = {
   getBreedById: breedController.getById.bind(breedController),
   getBreedsByCategory: breedController.getBreedsByCategory.bind(breedController),
   updateBreed: breedController.update.bind(breedController),
-  deleteBreed: breedController.delete.bind(breedController)
+  deleteBreed: breedController.delete.bind(breedController),
+  searchBreedsByName: breedController.searchBreedsByName.bind(breedController),
+  getBreedSearchSuggestions: breedController.getBreedSearchSuggestions.bind(breedController),
 };

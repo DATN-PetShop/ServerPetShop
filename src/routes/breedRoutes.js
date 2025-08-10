@@ -11,46 +11,20 @@ const {
   getBreedsByCategory,
   updateBreed,
   deleteBreed,
+  searchBreedsByName,
+  getBreedSearchSuggestions
 } = require('../controllers/breedController');
 
-// ===== PUBLIC ROUTES =====
-// Lấy tất cả breeds (public, cho user app)
-router.get('/public', getAllBreeds);
-
-// Lấy breeds theo category (public)
-router.get('/public/category/:categoryId', getBreedsByCategory);
-
-// Lấy breed theo ID (public)
-router.get('/public/:id', getBreedById);
-
-// ===== AUTHENTICATED ROUTES =====
-// Lấy tất cả breeds (authenticated users)
-// router.get('/', auth, getAllBreeds);
-router.get('/', getAllBreeds); 
-// Lấy breed theo ID (authenticated users)
-router.get('/:id', auth, getBreedById);
-
-// Lấy breeds theo category (authenticated users)
-router.get('/category/:categoryId', getBreedsByCategory);
-
+router.get('/search', searchBreedsByName);                    // Tìm kiếm breed theo tên
+router.get('/search/suggestions', getBreedSearchSuggestions); // Gợi ý tìm kiếm
 // ===== ADMIN/STAFF ROUTES =====
-// Tạo breed mới (Admin/Staff only)
-router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createBreed);
-
-// Cập nhật breed (Admin/Staff only)
-router.put('/:id', auth, requireRoles(['Admin', 'Staff']),upload.array('images', 5),  updateBreed);
-
 // ai cung xem dc
 router.get('/',  getAllBreeds); 
 router.get('/:id', getBreedById);
 router.get('/category/:categoryId', getBreedsByCategory); 
 
-// admin nhan vien - Thêm upload middleware để xử lý images
+// admin nhan vien 
 router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createBreed);
 router.put('/:id', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), updateBreed);
-
-// ===== ADMIN ONLY ROUTES =====
-// Xóa breed (Admin only)
 router.delete('/:id', auth, requireRoles(['Admin']), deleteBreed);
-
 module.exports = router;
