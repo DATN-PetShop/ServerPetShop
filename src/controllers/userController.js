@@ -1,22 +1,23 @@
 // src/controllers/userController.js
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 const { sendWelcomeNotification } = require('../services/notificationService');
+const { sendOtpEmail } = require('../services/emailService');
 
 // Generate JWT Token
 const generateToken = (userId, role, status) => {
   return jwt.sign({ userId, role, status }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
-// @desc    Register a new user
+// @desc    Register (request OTP)
 // @route   POST /api/users/register
 // @access  Public
 const registerUser = async (req, res) => {
   try {
     const { username, email, password, role, phone } = req.body;
 
-    // Validation
     if (!username || !email || !password) {
       return res.status(400).json({
         success: false,
@@ -26,55 +27,56 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({
-      $or: [{ email }, { username }]
-    });
-
-    if (existingUser) {
+    // If user exists and is already active, block
+    const existingUser = await User.findOne({ email });
+    if (existingUser && existingUser.status === 'active') {
       return res.status(409).json({
         success: false,
         statusCode: 409,
-        message: 'User with this email or username already exists',
+        message: 'Email already in use',
         data: null
       });
     }
 
-    // Hash password
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    // Prepare OTP
+    const otp = ('' + Math.floor(100000 + Math.random() * 900000));
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Create user
-    const user = new User({
-      username,
-      email,
-      password_hash: hashedPassword,
-      role: role || 'User',
-      phone
-    });
+    // If user exists but not active, update OTP; else create pending user
+    if (existingUser) {
+      existingUser.username = existingUser.username || username;
+      existingUser.password_hash = existingUser.password_hash || await bcrypt.hash(password, 10);
+      existingUser.role = existingUser.role || role || 'User';
+      existingUser.phone = existingUser.phone || phone;
+      existingUser.status = 'inactive';
+      existingUser.registration_otp_hash = otpHash;
+      existingUser.registration_otp_expires = expiresAt;
+      existingUser.registration_otp_attempts = 1;
+      await existingUser.save();
+    } else {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = new User({
+        username,
+        email,
+        password_hash: hashedPassword,
+        role: role || 'User',
+        phone,
+        status: 'inactive',
+        registration_otp_hash: otpHash,
+        registration_otp_expires: expiresAt,
+        registration_otp_attempts: 1,
+      });
+      await user.save();
+    }
 
-    const savedUser = await user.save();
+    await sendOtpEmail(email, otp);
 
-    // Generate token
-    const token = generateToken(savedUser._id, savedUser.role, savedUser.status);
-
-    // Gửi notification chào mừng cho user mới (không blocking)
-    setTimeout(async () => {
-      try {
-        await sendWelcomeNotification(savedUser._id, savedUser.username);
-      } catch (notificationError) {
-        console.error('Failed to send welcome notification:', notificationError);
-      }
-    }, 1000); // Delay 1 giây để user có thể lưu push token
-
-    // Return success response
-    res.status(201).json({
+    return res.status(200).json({
       success: true,
-      statusCode: 201,
-      message: 'User registered successfully',
-      data: {
-        token
-      }
+      statusCode: 200,
+      message: 'OTP sent to email. Please verify to complete registration.',
+      data: null,
     });
 
   } catch (error) {
@@ -85,6 +87,85 @@ const registerUser = async (req, res) => {
       message: 'Internal server error',
       data: null,
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// @desc    Verify registration OTP
+// @route   POST /api/users/verify-register
+// @access  Public
+const verifyRegistrationOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Email and OTP are required',
+        data: null,
+      });
+    }
+
+    const user = await User.findOne({ email }).select('+registration_otp_hash registration_otp_expires status role');
+    if (!user || !user.registration_otp_hash || !user.registration_otp_expires) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Invalid or expired OTP',
+        data: null,
+      });
+    }
+
+    if (user.registration_otp_expires < new Date()) {
+      user.registration_otp_hash = null;
+      user.registration_otp_expires = null;
+      user.registration_otp_attempts = 0;
+      await user.save();
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'OTP expired. Please register again.',
+        data: null,
+      });
+    }
+
+    const submittedHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
+    if (submittedHash !== user.registration_otp_hash) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Invalid OTP',
+        data: null,
+      });
+    }
+
+    user.status = 'active';
+    user.registration_otp_hash = null;
+    user.registration_otp_expires = null;
+    user.registration_otp_attempts = 0;
+    await user.save();
+
+    const token = generateToken(user._id, user.role, user.status);
+
+    // Welcome notification (non-blocking)
+    setTimeout(async () => {
+      try { await sendWelcomeNotification(user._id, user.username); } catch (_) {}
+    }, 1000);
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Registration verified successfully',
+      data: { token },
+    });
+  } catch (error) {
+    console.error('Verify registration OTP error:', error);
+    return res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 };
@@ -813,6 +894,160 @@ const unbanUser = async (req, res) => {
   }
 };
 
+// @desc    Request password reset (send OTP)
+// @route   POST /api/users/forgot-password
+// @access  Public
+async function requestPasswordReset(req, res) {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Email is required',
+        data: null,
+      });
+    }
+
+    const user = await User.findOne({ email });
+    // Chỉ gửi OTP nếu email tồn tại; nếu không thì báo lỗi
+    if (!user) {
+      return res.status(404).json({
+        success: false,     
+        statusCode: 404,
+        message: 'Email not found',
+        data: null,
+      });
+    }
+
+    const now = new Date();
+    const windowMs = 5 * 60 * 1000; // 5 minutes
+    if (user.password_reset_expires && user.password_reset_expires > now && user.password_reset_attempts >= 5) {
+      return res.status(429).json({
+        success: false,
+        statusCode: 429,
+        message: 'Too many requests. Please try again later.',
+        data: null,
+      });
+    }
+
+    // Generate 6-digit numeric OTP
+    const otp = ('' + Math.floor(100000 + Math.random() * 900000));
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    user.password_reset_otp_hash = otpHash;
+    user.password_reset_expires = expiresAt;
+    user.password_reset_attempts = (user.password_reset_expires && user.password_reset_expires > now)
+      ? (user.password_reset_attempts + 1)
+      : 1;
+    await user.save();
+
+    await sendOtpEmail(email, otp);
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'If an account with that email exists, an OTP has been sent',
+      data: null,
+    });
+
+  } catch (error) {
+    console.error('Request password reset error:', error);
+    return res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+}
+
+// @desc    Verify OTP and reset password
+// @route   POST /api/users/reset-password
+// @access  Public
+async function verifyOtpAndResetPassword(req, res) {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Email, OTP and newPassword are required',
+        data: null,
+      });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'New password must be at least 6 characters long',
+        data: null,
+      });
+    }
+
+    const user = await User.findOne({ email }).select('+password_reset_otp_hash password_hash password_reset_expires password_reset_attempts');
+    if (!user || !user.password_reset_otp_hash || !user.password_reset_expires) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Invalid or expired OTP',
+        data: null,
+      });
+    }
+
+    if (user.password_reset_expires < new Date()) {
+      // clear fields
+      user.password_reset_otp_hash = null;
+      user.password_reset_expires = null;
+      user.password_reset_attempts = 0;
+      await user.save();
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'OTP expired. Please request a new one.',
+        data: null,
+      });
+    }
+
+    const submittedHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
+    if (submittedHash !== user.password_reset_otp_hash) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: 'Invalid OTP',
+        data: null,
+      });
+    }
+
+    const saltRounds = 10;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    user.password_hash = hashedNewPassword;
+    user.password_reset_otp_hash = null;
+    user.password_reset_expires = null;
+    user.password_reset_attempts = 0;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Password reset successfully',
+      data: null,
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+}
+
 module.exports = {
   registerUser,
   loginUser,
@@ -830,4 +1065,8 @@ module.exports = {
   changePassword,
   banUser,
   unbanUser,
+  verifyRegistrationOtp,
+  requestPasswordReset,
+  verifyOtpAndResetPassword,
 };
+
