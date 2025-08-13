@@ -36,6 +36,34 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  // Password reset fields
+  password_reset_otp_hash: {
+    type: String,
+    default: null,
+    select: false,
+  },
+  password_reset_expires: {
+    type: Date,
+    default: null,
+  },
+  password_reset_attempts: {
+    type: Number,
+    default: 0,
+  },
+  // Registration verification fields
+  registration_otp_hash: {
+    type: String,
+    default: null,
+    select: false,
+  },
+  registration_otp_expires: {
+    type: Date,
+    default: null,
+  },
+  registration_otp_attempts: {
+    type: Number,
+    default: 0,
+  },
   created_at: {
     type: Date,
     default: Date.now,

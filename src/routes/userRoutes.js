@@ -18,7 +18,10 @@ const {
   deleteUser,
   changePassword,
   banUser,   
-  unbanUser 
+  unbanUser, 
+  requestPasswordReset,
+  verifyOtpAndResetPassword,
+  verifyRegistrationOtp,
 } = require('../controllers/userController');
 const auth = require('../middleware/auth');
 const requireRoles = require('../middleware/requireRole');
@@ -32,15 +35,17 @@ const customersLimiter = rateLimit({
 
 // Public routes
 router.post('/register', registerUser);
+router.post('/verify-register', verifyRegistrationOtp);
 router.post('/login', loginUser);
-router.post('/logout', auth, logoutUser);
+router.post('/forgot-password', requestPasswordReset);
+router.post('/reset-password', verifyOtpAndResetPassword);
 
 // user
 router.get('/me', auth, getCurrentUser);
 router.put('/change-password', auth, changePassword);
 router.get('/admin', auth, requireRoles(['Admin']), adminRoute);
 router.get('/staff', auth, requireRoles(['Admin', 'Staff']), staffRoute);
-
+router.post('/logout', auth, logoutUser);
 router.get('/', auth, requireRoles(['Admin']), getAllUsers);
 router.get('/staff-only', auth, requireRoles(['Admin']), getStaffUsers); 
 router.get('/customers',  auth, requireRoles(['Admin', 'Staff']), getCustomerUsers);    
