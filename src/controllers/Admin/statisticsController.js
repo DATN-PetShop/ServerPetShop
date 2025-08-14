@@ -7,7 +7,6 @@ const Pet = require('../../models/Pet');
 const Product = require('../../models/Product');
 const Category = require('../../models/Category');
 const Appointment = require('../../models/Appointment');
-const ChatMessage = require('../../models/ChatMessage');
 const PetVariant = require('../../models/PetVariant');
 const ProductImage = require('../../models/ProductImage');
 const Image = require('../../models/ImagePet');
@@ -1694,167 +1693,169 @@ async getInventoryStatistics(req, res) {
   }
 
   async getProfitByProducts(req, res) {
-    try {
-      const { limit = 20, type = 'all' } = req.query;
-      
-      console.log(`🛍️ Getting profit by products (${type}, limit: ${limit})`);
+  try {
+    const { limit = 20, type = 'all' } = req.query;
+    
+    console.log(`🛍️ Getting profit by products (${type}, limit: ${limit})`);
 
-      const profitByProducts = await OrderItem.aggregate([
-        {
-          $lookup: {
-            from: 'orders',
-            localField: 'order_id',
-            foreignField: '_id',
-            as: 'order'
-          }
-        },
-        { $unwind: '$order' },
-        {
-          $match: {
-            'order.status': { $in: ['completed', 'delivered'] }
-          }
-        },
-        {
-          $lookup: {
-            from: 'pets',
-            localField: 'pet_id',
-            foreignField: '_id',
-            as: 'pet'
-          }
-        },
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'product_id',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        {
-          $lookup: {
-            from: 'petvariants',
-            localField: 'variant_id',
-            foreignField: '_id',
-            as: 'variant'
-          }
-        },
-        {
-          $addFields: {
-            itemType: {
-              $cond: [
-                { $gt: [{ $size: '$pet' }, 0] }, 'pet',
-                {
-                  $cond: [
-                    { $gt: [{ $size: '$product' }, 0] }, 'product',
-                    'variant'
-                  ]
-                }
-              ]
-            },
-            itemInfo: {
-              $cond: [
-                { $gt: [{ $size: '$pet' }, 0] },
-                { $arrayElemAt: ['$pet', 0] },
-                {
-                  $cond: [
-                    { $gt: [{ $size: '$product' }, 0] },
-                    { $arrayElemAt: ['$product', 0] },
-                    { $arrayElemAt: ['$variant', 0] }
-                  ]
-                }
-              ]
-            },
-            itemCostPrice: {
-              $cond: [
-                { $gt: [{ $size: '$pet' }, 0] },
-                { $multiply: ['$quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                {
-                  $cond: [
-                    { $gt: [{ $size: '$product' }, 0] },
-                    { $multiply: ['$quantity', { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] }] },
-                    {
-                      $cond: [
-                        { $gt: [{ $size: '$variant' }, 0] },
-                        { $multiply: ['$quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                        { $multiply: ['$quantity', { $multiply: ['$unit_price', 0.7] }] }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            itemRevenue: { $multiply: ['$quantity', '$unit_price'] }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              itemId: {
+    const profitByProducts = await OrderItem.aggregate([
+      {
+        $lookup: {
+          from: 'orders',
+          localField: 'order_id',
+          foreignField: '_id',
+          as: 'order'
+        }
+      },
+      { $unwind: '$order' },
+      {
+        $match: {
+          'order.status': { $in: ['completed', 'delivered'] }
+        }
+      },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'product_id',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      {
+        $lookup: {
+          from: 'petvariants',
+          localField: 'variant_id',
+          foreignField: '_id',
+          as: 'variant'
+        }
+      },
+      {
+        $addFields: {
+          itemType: {
+            $cond: [
+              { $gt: [{ $size: '$pet' }, 0] }, 'pet',
+              {
                 $cond: [
-                  { $gt: [{ $size: '$pet' }, 0] }, '$pet_id',
+                  { $gt: [{ $size: '$product' }, 0] }, 'product',
+                  'variant'
+                ]
+              }
+            ]
+          },
+          itemInfo: {
+            $cond: [
+              { $gt: [{ $size: '$pet' }, 0] },
+              { $arrayElemAt: ['$pet', 0] },
+              {
+                $cond: [
+                  { $gt: [{ $size: '$product' }, 0] },
+                  { $arrayElemAt: ['$product', 0] },
+                  { $arrayElemAt: ['$variant', 0] }
+                ]
+              }
+            ]
+          },
+          itemCostPrice: {
+            $cond: [
+              { $gt: [{ $size: '$pet' }, 0] },
+              { $multiply: ['$quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+              {
+                $cond: [
+                  { $gt: [{ $size: '$product' }, 0] },
+                  // FIX: Sử dụng purchase_price thay vì price * 0.7
+                  { $multiply: ['$quantity', { $arrayElemAt: ['$product.purchase_price', 0] }] },
                   {
                     $cond: [
-                      { $gt: [{ $size: '$product' }, 0] }, '$product_id',
-                      '$variant_id'
+                      { $gt: [{ $size: '$variant' }, 0] },
+                      { $multiply: ['$quantity', { $arrayElemAt: ['$variant.purchase_price', 0] }] },
+                      // Fallback case - có thể cần điều chỉnh
+                      { $multiply: ['$quantity', { $multiply: ['$unit_price', 0.7] }] }
                     ]
                   }
                 ]
-              },
-              itemType: '$itemType'
-            },
-            itemInfo: { $first: '$itemInfo' },
-            totalRevenue: { $sum: '$itemRevenue' },
-            totalCostPrice: { $sum: '$itemCostPrice' },
-            totalQuantitySold: { $sum: '$quantity' },
-            totalOrders: { $addToSet: '$order_id' }
-          }
-        },
-        {
-          $project: {
-            itemInfo: 1,
-            itemType: '$_id.itemType',
-            totalRevenue: 1,
-            totalCostPrice: 1,
-            totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
-            profitMargin: {
+              }
+            ]
+          },
+          itemRevenue: { $multiply: ['$quantity', '$unit_price'] }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            itemId: {
               $cond: [
-                { $gt: ['$totalRevenue', 0] },
+                { $gt: [{ $size: '$pet' }, 0] }, '$pet_id',
                 {
-                  $multiply: [
-                    { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
-                    100
+                  $cond: [
+                    { $gt: [{ $size: '$product' }, 0] }, '$product_id',
+                    '$variant_id'
                   ]
-                },
-                0
+                }
               ]
             },
-            totalQuantitySold: 1,
-            totalOrders: { $size: '$totalOrders' }
-          }
-        },
-        { $sort: { totalProfit: -1 } },
-        { $limit: parseInt(limit) }
-      ]);
+            itemType: '$itemType'
+          },
+          itemInfo: { $first: '$itemInfo' },
+          totalRevenue: { $sum: '$itemRevenue' },
+          totalCostPrice: { $sum: '$itemCostPrice' },
+          totalQuantitySold: { $sum: '$quantity' },
+          totalOrders: { $addToSet: '$order_id' }
+        }
+      },
+      {
+        $project: {
+          itemInfo: 1,
+          itemType: '$_id.itemType',
+          totalRevenue: 1,
+          totalCostPrice: 1,
+          totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
+          profitMargin: {
+            $cond: [
+              { $gt: ['$totalRevenue', 0] },
+              {
+                $multiply: [
+                  { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
+                  100
+                ]
+              },
+              0
+            ]
+          },
+          totalQuantitySold: 1,
+          totalOrders: { $size: '$totalOrders' }
+        }
+      },
+      { $sort: { totalProfit: -1 } },
+      { $limit: parseInt(limit) }
+    ]);
 
-      console.log(`✅ Found ${profitByProducts.length} products with profit data`);
+    console.log(`✅ Found ${profitByProducts.length} products with profit data`);
 
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Profit by products retrieved successfully',
-        data: profitByProducts
-      });
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Profit by products retrieved successfully',
+      data: profitByProducts
+    });
 
-    } catch (error) {
-      console.error('❌ Profit by products error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
-    }
+  } catch (error) {
+    console.error('❌ Profit by products error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
   }
+}
 
   async getCurrentInventoryValue(req, res) {
     try {
