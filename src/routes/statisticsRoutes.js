@@ -10,8 +10,12 @@ const {
   getCustomerStatistics,
   getInventoryStatistics,
   getServiceStatistics,
-  getOperationalStatistics,
-  getDashboardOverview
+  getDashboardOverview,
+  getProfitOverview,
+  getProfitByPeriod,
+  getProfitByProducts,
+  getCurrentInventoryValue,
+  getDashboardProfitSummary
 } = require('../controllers/Admin/statisticsController');
 
 // Middleware: Chỉ Admin và Staff mới có thể xem thống kê
@@ -39,14 +43,14 @@ router.get('/customers', statsAuth, getCustomerStatistics);
 // ===============================
 router.get('/inventory', statsAuth, getInventoryStatistics);
 
-// ===============================
+// =============================== 
 // 4. THỐNG KÊ DỊCH VỤ
 // ===============================
 router.get('/services', statsAuth, getServiceStatistics);
 
-// ===============================
-// 5. THỐNG KÊ VẬN HÀNH
-// ===============================
-router.get('/operations', statsAuth, getOperationalStatistics);
-
+router.get('/profit/overview', statsAuth, getProfitOverview);
+router.get('/profit/by-period', statsAuth, getProfitByPeriod);  
+router.get('/profit/by-products', statsAuth, getProfitByProducts);
+router.get('/inventory/value', statsAuth, getCurrentInventoryValue);
+router.get('/dashboard/profit', statsAuth, getDashboardProfitSummary);
 module.exports = router;
