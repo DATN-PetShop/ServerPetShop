@@ -1377,322 +1377,346 @@ async getInventoryStatistics(req, res) {
   }
 
 
-  async getProfitOverview(req, res) {
-    try {
-      const { startDate, endDate } = req.query;
-      
-      let matchStage = {
-        status: { $in: ['completed', 'delivered'] } // Chỉ tính đơn hàng hoàn thành
-      };
+// 🔧 FIXED: 4 hàm đã được sửa để sử dụng purchase_price cho Product
 
-      if (startDate || endDate) {
-        matchStage.created_at = {};
-        if (startDate) matchStage.created_at.$gte = new Date(startDate);
-        if (endDate) matchStage.created_at.$lte = new Date(endDate);
-      }
+async getProfitOverview(req, res) {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    let matchStage = {
+      status: { $in: ['completed', 'delivered'] } // Chỉ tính đơn hàng hoàn thành
+    };
 
-      console.log('💰 Getting profit overview with filter:', matchStage);
+    if (startDate || endDate) {
+      matchStage.created_at = {};
+      if (startDate) matchStage.created_at.$gte = new Date(startDate);
+      if (endDate) matchStage.created_at.$lte = new Date(endDate);
+    }
 
-      // Aggregate để tính tổng quan vốn và lời
-      const overview = await Order.aggregate([
-        { $match: matchStage },
-        {
-          $lookup: {
-            from: 'orderitems',
-            localField: '_id',
-            foreignField: 'order_id',
-            as: 'items'
-          }
-        },
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'pets',
-            localField: 'items.pet_id',
-            foreignField: '_id',
-            as: 'pet'
-          }
-        },
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'items.product_id',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        {
-          $lookup: {
-            from: 'petvariants',
-            localField: 'items.variant_id',
-            foreignField: '_id',
-            as: 'variant'
-          }
-        },
-        {
-          $addFields: {
-            // Tính giá vốn cho từng item
-            itemCostPrice: {
-              $cond: [
-                { $gt: [{ $size: '$pet' }, 0] },
-                // Pet: dùng Pet.price làm cost price (giá nhập)
-                { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                {
-                  $cond: [
-                    { $gt: [{ $size: '$product' }, 0] },
-                    // Product: estimate cost = 70% selling price
-                    { $multiply: ['$items.quantity', { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] }] },
-                    {
-                      $cond: [
-                        { $gt: [{ $size: '$variant' }, 0] },
-                        // Variant: dùng Pet.price làm cost (lookup pet từ variant)
-                        { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                        // Fallback: estimate 70% of unit_price
-                        { $multiply: ['$items.quantity', { $multiply: ['$items.unit_price', 0.7] }] }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            // Doanh thu cho từng item = unit_price * quantity
-            itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            totalRevenue: { $sum: '$itemRevenue' },
-            totalCostPrice: { $sum: '$itemCostPrice' },
-            totalOrders: { $addToSet: '$_id' },
-            totalItems: { $sum: '$items.quantity' }
-          }
-        },
-        {
-          $project: {
-            totalRevenue: 1,
-            totalCostPrice: 1,
-            totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
-            profitMargin: {
-              $cond: [
-                { $gt: ['$totalRevenue', 0] },
-                {
-                  $multiply: [
-                    { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
-                    100
-                  ]
-                },
-                0
-              ]
-            },
-            totalOrders: { $size: '$totalOrders' },
-            totalItems: 1,
-            averageOrderValue: { 
-              $cond: [
-                { $gt: [{ $size: '$totalOrders' }, 0] },
-                { $divide: ['$totalRevenue', { $size: '$totalOrders' }] },
-                0
-              ]
-            }
+    console.log('💰 Getting profit overview with filter:', matchStage);
+
+    // Aggregate để tính tổng quan vốn và lời
+    const overview = await Order.aggregate([
+      { $match: matchStage },
+      {
+        $lookup: {
+          from: 'orderitems',
+          localField: '_id',
+          foreignField: 'order_id',
+          as: 'items'
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'items.pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product_id',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      {
+        $lookup: {
+          from: 'petvariants',
+          localField: 'items.variant_id',
+          foreignField: '_id',
+          as: 'variant'
+        }
+      },
+      {
+        $addFields: {
+          // 🔧 FIX: Tính giá vốn cho từng item với purchase_price
+          itemCostPrice: {
+            $cond: [
+              { $gt: [{ $size: '$pet' }, 0] },
+              // Pet: dùng Pet.price làm cost price (giá nhập)
+              { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+              {
+                $cond: [
+                  { $gt: [{ $size: '$product' }, 0] },
+                  // 🔧 FIX: Product - dùng purchase_price thay vì price * 0.7
+                  { 
+                    $multiply: [
+                      '$items.quantity', 
+                      {
+                        $ifNull: [
+                          { $arrayElemAt: ['$product.purchase_price', 0] },
+                          { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
+                        ]
+                      }
+                    ] 
+                  },
+                  {
+                    $cond: [
+                      { $gt: [{ $size: '$variant' }, 0] },
+                      // Variant: lookup pet để lấy price
+                      { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+                      // Fallback: estimate 70% of unit_price
+                      { $multiply: ['$items.quantity', { $multiply: ['$items.unit_price', 0.7] }] }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          // Doanh thu cho từng item = unit_price * quantity
+          itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: '$itemRevenue' },
+          totalCostPrice: { $sum: '$itemCostPrice' },
+          totalOrders: { $addToSet: '$_id' },
+          totalItems: { $sum: '$items.quantity' }
+        }
+      },
+      {
+        $project: {
+          totalRevenue: 1,
+          totalCostPrice: 1,
+          totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
+          profitMargin: {
+            $cond: [
+              { $gt: ['$totalRevenue', 0] },
+              {
+                $multiply: [
+                  { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
+                  100
+                ]
+              },
+              0
+            ]
+          },
+          totalOrders: { $size: '$totalOrders' },
+          totalItems: 1,
+          averageOrderValue: { 
+            $cond: [
+              { $gt: [{ $size: '$totalOrders' }, 0] },
+              { $divide: ['$totalRevenue', { $size: '$totalOrders' }] },
+              0
+            ]
           }
         }
-      ]);
-
-      const result = overview[0] || {
-        totalRevenue: 0,
-        totalCostPrice: 0,
-        totalProfit: 0,
-        profitMargin: 0,
-        totalOrders: 0,
-        totalItems: 0,
-        averageOrderValue: 0
-      };
-
-      console.log('✅ Profit overview result:', result);
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Profit overview retrieved successfully',
-        data: result
-      });
-
-    } catch (error) {
-      console.error('❌ Profit overview error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
-    }
-  }
-
-  async getProfitByPeriod(req, res) {
-    try {
-      const { startDate, endDate, period = 'day' } = req.query;
-      
-      let matchStage = {
-        status: { $in: ['completed', 'delivered'] }
-      };
-
-      if (startDate || endDate) {
-        matchStage.created_at = {};
-        if (startDate) matchStage.created_at.$gte = new Date(startDate);
-        if (endDate) matchStage.created_at.$lte = new Date(endDate);
       }
+    ]);
 
-      // Định nghĩa group stage theo period
-      let groupByPeriod;
-      switch (period) {
-        case 'day':
-          groupByPeriod = {
-            year: { $year: '$created_at' },
-            month: { $month: '$created_at' },
-            day: { $dayOfMonth: '$created_at' }
-          };
-          break;
-        case 'week':
-          groupByPeriod = {
-            year: { $year: '$created_at' },
-            week: { $week: '$created_at' }
-          };
-          break;
-        case 'month':
-          groupByPeriod = {
-            year: { $year: '$created_at' },
-            month: { $month: '$created_at' }
-          };
-          break;
-        case 'year':
-          groupByPeriod = {
-            year: { $year: '$created_at' }
-          };
-          break;
-        default:
-          groupByPeriod = {
-            year: { $year: '$created_at' },
-            month: { $month: '$created_at' },
-            day: { $dayOfMonth: '$created_at' }
-          };
-      }
+    const result = overview[0] || {
+      totalRevenue: 0,
+      totalCostPrice: 0,
+      totalProfit: 0,
+      profitMargin: 0,
+      totalOrders: 0,
+      totalItems: 0,
+      averageOrderValue: 0
+    };
 
-      console.log(`📊 Getting profit by ${period} with filter:`, matchStage);
+    console.log('✅ Profit overview result:', result);
 
-      const profitByPeriod = await Order.aggregate([
-        { $match: matchStage },
-        {
-          $lookup: {
-            from: 'orderitems',
-            localField: '_id',
-            foreignField: 'order_id',
-            as: 'items'
-          }
-        },
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'pets',
-            localField: 'items.pet_id',
-            foreignField: '_id',
-            as: 'pet'
-          }
-        },
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'items.product_id',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        {
-          $lookup: {
-            from: 'petvariants',
-            localField: 'items.variant_id',
-            foreignField: '_id',
-            as: 'variant'
-          }
-        },
-        {
-          $addFields: {
-            itemCostPrice: {
-              $cond: [
-                { $gt: [{ $size: '$pet' }, 0] },
-                { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                {
-                  $cond: [
-                    { $gt: [{ $size: '$product' }, 0] },
-                    { $multiply: ['$items.quantity', { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] }] },
-                    {
-                      $cond: [
-                        { $gt: [{ $size: '$variant' }, 0] },
-                        { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                        { $multiply: ['$items.quantity', { $multiply: ['$items.unit_price', 0.7] }] }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
-          }
-        },
-        {
-          $group: {
-            _id: groupByPeriod,
-            totalRevenue: { $sum: '$itemRevenue' },
-            totalCostPrice: { $sum: '$itemCostPrice' },
-            totalOrders: { $addToSet: '$_id' },
-            totalItems: { $sum: '$items.quantity' }
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            totalRevenue: 1,
-            totalCostPrice: 1,
-            totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
-            profitMargin: {
-              $cond: [
-                { $gt: ['$totalRevenue', 0] },
-                {
-                  $multiply: [
-                    { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
-                    100
-                  ]
-                },
-                0
-              ]
-            },
-            totalOrders: { $size: '$totalOrders' },
-            totalItems: 1
-          }
-        },
-        { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1, '_id.week': 1 } }
-      ]);
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Profit overview retrieved successfully',
+      data: result
+    });
 
-      console.log(`✅ Found ${profitByPeriod.length} periods with profit data`);
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Profit by period retrieved successfully',
-        data: profitByPeriod
-      });
-
-    } catch (error) {
-      console.error('❌ Profit by period error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
-    }
+  } catch (error) {
+    console.error('❌ Profit overview error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
   }
+}
 
-  async getProfitByProducts(req, res) {
+async getProfitByPeriod(req, res) {
+  try {
+    const { startDate, endDate, period = 'day' } = req.query;
+    
+    let matchStage = {
+      status: { $in: ['completed', 'delivered'] }
+    };
+
+    if (startDate || endDate) {
+      matchStage.created_at = {};
+      if (startDate) matchStage.created_at.$gte = new Date(startDate);
+      if (endDate) matchStage.created_at.$lte = new Date(endDate);
+    }
+
+    // Định nghĩa group stage theo period
+    let groupByPeriod;
+    switch (period) {
+      case 'day':
+        groupByPeriod = {
+          year: { $year: '$created_at' },
+          month: { $month: '$created_at' },
+          day: { $dayOfMonth: '$created_at' }
+        };
+        break;
+      case 'week':
+        groupByPeriod = {
+          year: { $year: '$created_at' },
+          week: { $week: '$created_at' }
+        };
+        break;
+      case 'month':
+        groupByPeriod = {
+          year: { $year: '$created_at' },
+          month: { $month: '$created_at' }
+        };
+        break;
+      case 'year':
+        groupByPeriod = {
+          year: { $year: '$created_at' }
+        };
+        break;
+      default:
+        groupByPeriod = {
+          year: { $year: '$created_at' },
+          month: { $month: '$created_at' },
+          day: { $dayOfMonth: '$created_at' }
+        };
+    }
+
+    console.log(`📊 Getting profit by ${period} with filter:`, matchStage);
+
+    const profitByPeriod = await Order.aggregate([
+      { $match: matchStage },
+      {
+        $lookup: {
+          from: 'orderitems',
+          localField: '_id',
+          foreignField: 'order_id',
+          as: 'items'
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'items.pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product_id',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      {
+        $lookup: {
+          from: 'petvariants',
+          localField: 'items.variant_id',
+          foreignField: '_id',
+          as: 'variant'
+        }
+      },
+      {
+        $addFields: {
+          // 🔧 FIX: Sử dụng purchase_price cho Product
+          itemCostPrice: {
+            $cond: [
+              { $gt: [{ $size: '$pet' }, 0] },
+              { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+              {
+                $cond: [
+                  { $gt: [{ $size: '$product' }, 0] },
+                  // 🔧 FIX: Dùng purchase_price thay vì price * 0.7
+                  { 
+                    $multiply: [
+                      '$items.quantity', 
+                      {
+                        $ifNull: [
+                          { $arrayElemAt: ['$product.purchase_price', 0] },
+                          { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
+                        ]
+                      }
+                    ] 
+                  },
+                  {
+                    $cond: [
+                      { $gt: [{ $size: '$variant' }, 0] },
+                      { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+                      { $multiply: ['$items.quantity', { $multiply: ['$items.unit_price', 0.7] }] }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
+        }
+      },
+      {
+        $group: {
+          _id: groupByPeriod,
+          totalRevenue: { $sum: '$itemRevenue' },
+          totalCostPrice: { $sum: '$itemCostPrice' },
+          totalOrders: { $addToSet: '$_id' },
+          totalItems: { $sum: '$items.quantity' }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          totalRevenue: 1,
+          totalCostPrice: 1,
+          totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
+          profitMargin: {
+            $cond: [
+              { $gt: ['$totalRevenue', 0] },
+              {
+                $multiply: [
+                  { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
+                  100
+                ]
+              },
+              0
+            ]
+          },
+          totalOrders: { $size: '$totalOrders' },
+          totalItems: 1
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1, '_id.week': 1 } }
+    ]);
+
+    console.log(`✅ Found ${profitByPeriod.length} periods with profit data`);
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Profit by period retrieved successfully',
+      data: profitByPeriod
+    });
+
+  } catch (error) {
+    console.error('❌ Profit by period error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
+  }
+}
+
+async getProfitByProducts(req, res) {
   try {
     const { limit = 20, type = 'all' } = req.query;
     
@@ -1763,6 +1787,7 @@ async getInventoryStatistics(req, res) {
               }
             ]
           },
+          // 🔧 FIX: Sử dụng purchase_price cho Product
           itemCostPrice: {
             $cond: [
               { $gt: [{ $size: '$pet' }, 0] },
@@ -1770,12 +1795,23 @@ async getInventoryStatistics(req, res) {
               {
                 $cond: [
                   { $gt: [{ $size: '$product' }, 0] },
-                  // FIX: Sử dụng purchase_price thay vì price * 0.7
-                  { $multiply: ['$quantity', { $arrayElemAt: ['$product.purchase_price', 0] }] },
+                  // 🔧 FIX: Sử dụng purchase_price thay vì price * 0.7
+                  { 
+                    $multiply: [
+                      '$quantity', 
+                      {
+                        $ifNull: [
+                          { $arrayElemAt: ['$product.purchase_price', 0] },
+                          { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
+                        ]
+                      }
+                    ] 
+                  },
                   {
                     $cond: [
                       { $gt: [{ $size: '$variant' }, 0] },
-                      { $multiply: ['$quantity', { $arrayElemAt: ['$variant.purchase_price', 0] }] },
+                      // Variant: Cần lookup thêm Pet để lấy price
+                      { $multiply: ['$quantity', { $arrayElemAt: ['$pet.price', 0] }] },
                       // Fallback case - có thể cần điều chỉnh
                       { $multiply: ['$quantity', { $multiply: ['$unit_price', 0.7] }] }
                     ]
@@ -1857,199 +1893,247 @@ async getInventoryStatistics(req, res) {
   }
 }
 
-  async getCurrentInventoryValue(req, res) {
-    try {
-      console.log('🏪 Getting current inventory value...');
+async getCurrentInventoryValue(req, res) {
+  try {
+    console.log('🏪 Getting current inventory value...');
 
-      // Tính tổng giá trị vốn của pets hiện có
-      const petInventory = await Pet.aggregate([
-        { $match: { status: 'available' } },
-        {
-          $group: {
-            _id: null,
-            totalPets: { $sum: 1 },
-            totalValue: { $sum: '$price' } // Pet.price = cost price (giá nhập)
+    // Tính tổng giá trị vốn của pets hiện có
+    const petInventory = await Pet.aggregate([
+      { $match: { status: 'available' } },
+      {
+        $group: {
+          _id: null,
+          totalPets: { $sum: 1 },
+          totalValue: { $sum: '$price' } // Pet.price = cost price (giá nhập)
+        }
+      }
+    ]);
+
+    // 🔧 FIX: Tính tổng giá trị vốn của variants - lookup Pet để lấy price
+    const variantInventory = await PetVariant.aggregate([
+      { 
+        $match: { 
+          is_available: true, 
+          stock_quantity: { $gt: 0 }
+        } 
+      },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
+      },
+      { $unwind: '$pet' },
+      {
+        $group: {
+          _id: null,
+          totalVariants: { $sum: '$stock_quantity' },
+          // 🔧 FIX: Dùng pet.price + price_adjustment cho variant
+          totalValue: { 
+            $sum: { 
+              $multiply: [
+                '$stock_quantity', 
+                { $add: ['$pet.price', { $ifNull: ['$price_adjustment', 0] }] }
+              ] 
+            } 
           }
         }
-      ]);
+      }
+    ]);
 
-      // Tính tổng giá trị vốn của variants hiện có
-      const variantInventory = await PetVariant.aggregate([
-        { $match: { is_available: true, stock_quantity: { $gt: 0 } } },
-        {
-          $lookup: {
-            from: 'pets',
-            localField: 'pet_id',
-            foreignField: '_id',
-            as: 'pet'
-          }
-        },
-        { $unwind: '$pet' },
-        {
-          $group: {
-            _id: null,
-            totalVariants: { $sum: '$stock_quantity' },
-            totalValue: { $sum: { $multiply: ['$stock_quantity', '$pet.price'] } } // Pet.price = cost price
-          }
-        }
-      ]);
-
-      // Tính tổng giá trị vốn của products hiện có (estimate)
-      const productInventory = await Product.aggregate([
-        { $match: { status: 'active', stock_quantity: { $gt: 0 } } },
-        {
-          $group: {
-            _id: null,
-            totalProducts: { $sum: '$stock_quantity' },
-            totalValue: { $sum: { $multiply: ['$stock_quantity', { $multiply: ['$price', 0.7] }] } } // Estimate cost = 70% price
-          }
-        }
-      ]);
-
-      const result = {
-        pets: petInventory[0] || { totalPets: 0, totalValue: 0 },
-        variants: variantInventory[0] || { totalVariants: 0, totalValue: 0 },
-        products: productInventory[0] || { totalProducts: 0, totalValue: 0 }
-      };
-
-      // Tính tổng cộng
-      result.summary = {
-        totalItems: result.pets.totalPets + result.variants.totalVariants + result.products.totalProducts,
-        totalInventoryValue: result.pets.totalValue + result.variants.totalValue + result.products.totalValue
-      };
-
-      console.log('✅ Inventory value calculated:', {
-        pets: result.pets.totalPets,
-        variants: result.variants.totalVariants,
-        products: result.products.totalProducts,
-        totalValue: result.summary.totalInventoryValue
-      });
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Current inventory value retrieved successfully',
-        data: result
-      });
-
-    } catch (error) {
-      console.error('❌ Current inventory value error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
-    }
-  }
-
-  // ===============================
-  // 🆕 THỐNG KÊ VỐN VÀ LỢI NHUẬN CHO DASHBOARD
-  // ===============================
-  
-  async getDashboardProfitSummary(req, res) {
-    try {
-      const today = new Date();
-      const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-      const endOfDay = new Date(today.setHours(23, 59, 59, 999));
-      
-      // Profit hôm nay
-      const todayProfit = await Order.aggregate([
-        {
-          $match: {
-            created_at: { $gte: startOfDay, $lte: endOfDay },
-            status: { $in: ['completed', 'delivered'] }
-          }
-        },
-        {
-          $lookup: {
-            from: 'orderitems',
-            localField: '_id',
-            foreignField: 'order_id',
-            as: 'items'
-          }
-        },
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'pets',
-            localField: 'items.pet_id',
-            foreignField: '_id',
-            as: 'pet'
-          }
-        },
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'items.product_id',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        {
-          $addFields: {
-            itemCostPrice: {
-              $cond: [
-                { $gt: [{ $size: '$pet' }, 0] },
-                { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                { $multiply: ['$items.quantity', { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] }] }
-              ]
-            },
-            itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            totalRevenue: { $sum: '$itemRevenue' },
-            totalCostPrice: { $sum: '$itemCostPrice' }
-          }
-        },
-        {
-          $project: {
-            totalRevenue: 1,
-            totalCostPrice: 1,
-            totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
-            profitMargin: {
-              $cond: [
-                { $gt: ['$totalRevenue', 0] },
+    // 🔧 FIX: Tính tổng giá trị vốn của products với purchase_price
+    const productInventory = await Product.aggregate([
+      { 
+        $match: { 
+          status: 'active', 
+          stock: { $gt: 0 }
+        } 
+      },
+      {
+        $group: {
+          _id: null,
+          totalProducts: { $sum: '$stock' },
+          // 🔧 FIX: Sử dụng purchase_price thay vì price * 0.7
+          totalValue: { 
+            $sum: { 
+              $multiply: [
+                '$stock', 
                 {
-                  $multiply: [
-                    { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
-                    100
-                  ]
-                },
-                0
-              ]
-            }
+                  $ifNull: ['$purchase_price', { $multiply: ['$price', 0.7] }] // Fallback nếu không có purchase_price
+                }
+              ] 
+            } 
           }
         }
-      ]);
-      
-      const result = todayProfit[0] || {
-        totalRevenue: 0,
-        totalCostPrice: 0,
-        totalProfit: 0,
-        profitMargin: 0
-      };
-      
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Dashboard profit summary retrieved successfully',
-        data: result
-      });
-      
-    } catch (error) {
-      console.error('Dashboard profit summary error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
-    }
+      }
+    ]);
+
+    // Debug logging để kiểm tra
+    console.log('🐕 Pet inventory:', petInventory);
+    console.log('🎭 Variant inventory:', variantInventory);  
+    console.log('📦 Product inventory:', productInventory);
+
+    const result = {
+      pets: petInventory[0] || { totalPets: 0, totalValue: 0 },
+      variants: variantInventory[0] || { totalVariants: 0, totalValue: 0 },
+      products: productInventory[0] || { totalProducts: 0, totalValue: 0 }
+    };
+
+    // Tính tổng cộng
+    result.summary = {
+      totalItems: result.pets.totalPets + result.variants.totalVariants + result.products.totalProducts,
+      totalInventoryValue: result.pets.totalValue + result.variants.totalValue + result.products.totalValue
+    };
+
+    console.log('✅ Inventory value calculated:', {
+      pets: result.pets.totalPets,
+      variants: result.variants.totalVariants,
+      products: result.products.totalProducts,
+      totalValue: result.summary.totalInventoryValue
+    });
+
+    // Debug: Log sample products để kiểm tra purchase_price field
+    const sampleProducts = await Product.find({ status: 'active' })
+      .limit(3)
+      .select('name stock purchase_price price');
+    console.log('📋 Sample products:', sampleProducts);
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Current inventory value retrieved successfully',
+      data: result
+    });
+
+  } catch (error) {
+    console.error('❌ Current inventory value error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
   }
+}
+
+async getDashboardProfitSummary(req, res) {
+  try {
+    const today = new Date();
+    const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+    
+    // Profit hôm nay
+    const todayProfit = await Order.aggregate([
+      {
+        $match: {
+          created_at: { $gte: startOfDay, $lte: endOfDay },
+          status: { $in: ['completed', 'delivered'] }
+        }
+      },
+      {
+        $lookup: {
+          from: 'orderitems',
+          localField: '_id',
+          foreignField: 'order_id',
+          as: 'items'
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'items.pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product_id',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      {
+        $addFields: {
+          // 🔧 FIX: Sử dụng purchase_price cho Product
+          itemCostPrice: {
+            $cond: [
+              { $gt: [{ $size: '$pet' }, 0] },
+              { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+              // 🔧 FIX: Dùng purchase_price thay vì price * 0.7
+              { 
+                $multiply: [
+                  '$items.quantity', 
+                  {
+                    $ifNull: [
+                      { $arrayElemAt: ['$product.purchase_price', 0] },
+                      { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
+                    ]
+                  }
+                ] 
+              }
+            ]
+          },
+          itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: '$itemRevenue' },
+          totalCostPrice: { $sum: '$itemCostPrice' }
+        }
+      },
+      {
+        $project: {
+          totalRevenue: 1,
+          totalCostPrice: 1,
+          totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
+          profitMargin: {
+            $cond: [
+              { $gt: ['$totalRevenue', 0] },
+              {
+                $multiply: [
+                  { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
+                  100
+                ]
+              },
+              0
+            ]
+          }
+        }
+      }
+    ]);
+    
+    const result = todayProfit[0] || {
+      totalRevenue: 0,
+      totalCostPrice: 0,
+      totalProfit: 0,
+      profitMargin: 0
+    };
+    
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Dashboard profit summary retrieved successfully',
+      data: result
+    });
+    
+  } catch (error) {
+    console.error('Dashboard profit summary error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
+  }
+}
+
 }
 
 module.exports = new StatisticsController();
