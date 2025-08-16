@@ -14,7 +14,7 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
-// Validation cho update appointment status (enhanced version)
+// Validation cho update appointment status (enhanced version) - UPDATED: Thêm 'no-show'
 const validateUpdateStatus = [
   param('id')
     .isMongoId()
@@ -22,7 +22,7 @@ const validateUpdateStatus = [
   
   body('status')
     .optional()
-    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled'])
+    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show']) // ADDED 'no-show'
     .withMessage('Trạng thái không hợp lệ'),
   
   body('staff_id')
@@ -47,7 +47,7 @@ const validateUpdateStatus = [
   handleValidationErrors
 ];
 
-// Validation cho get all appointments (enhanced version)
+// Validation cho get all appointments (enhanced version) - UPDATED: Thêm 'no-show'
 const validateGetAllAppointments = [
   query('page')
     .optional()
@@ -61,7 +61,7 @@ const validateGetAllAppointments = [
   
   query('status')
     .optional()
-    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled'])
+    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show']) // ADDED 'no-show'
     .withMessage('Trạng thái không hợp lệ'),
   
   query('date')
@@ -167,7 +167,7 @@ const validateGetByDate = [
   handleValidationErrors
 ];
 
-// Validation cho bulk update (enhanced)
+// Validation cho bulk update (enhanced) - UPDATED: Thêm 'no-show'
 const validateBulkUpdate = [
   body('appointment_ids')
     .isArray({ min: 1, max: 50 })
@@ -198,7 +198,7 @@ const validateBulkUpdate = [
   
   body('updates.status')
     .optional()
-    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled'])
+    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show']) // ADDED 'no-show'
     .withMessage('Trạng thái không hợp lệ'),
   
   body('updates.staff_id')
@@ -380,7 +380,7 @@ const validateGetAvailableSlots = [
   handleValidationErrors
 ];
 
-// Validation cho get user appointments
+// Validation cho get user appointments - UPDATED: Thêm 'no-show'
 const validateGetUserAppointments = [
   query('page')
     .optional()
@@ -394,7 +394,7 @@ const validateGetUserAppointments = [
   
   query('status')
     .optional()
-    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled'])
+    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show']) // ADDED 'no-show'
     .withMessage('Trạng thái không hợp lệ'),
   
   handleValidationErrors

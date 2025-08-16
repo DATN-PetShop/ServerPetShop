@@ -1,4 +1,4 @@
-// src/controllers/AdminAppointmentController.js
+// src/controllers/Admin/AdminAppointmentController.js
 const Appointment = require('../../models/Appointment');
 const CareService = require('../../models/CareService');
 const Pet = require('../../models/Pet');
@@ -20,8 +20,8 @@ class AdminAppointmentController {
         search,
         page = 1, 
         limit = 10,
-        sort_by = 'appointment_date',
-        sort_order = 'asc'
+        sort_by = 'created_at', // THAY ĐỔI: Sắp xếp theo ngày tạo thay vì ngày hẹn
+        sort_order = 'desc' // THAY ĐỔI: Mặc định desc để hiển thị mới nhất trước
       } = req.query;
 
       console.log('Admin getAllAppointments - Query params:', req.query);
@@ -74,12 +74,15 @@ class AdminAppointmentController {
       const sortObj = {};
       sortObj[sort_by] = sort_order === 'desc' ? -1 : 1;
       
-      // Thêm sort phụ để đảm bảo thứ tự nhất quán
+      // THAY ĐỔI: Cập nhật sort phụ để ưu tiên hiển thị lịch mới nhất
+      if (sort_by !== 'created_at') {
+        sortObj.created_at = -1; // Luôn sắp xếp theo ngày tạo desc làm sort phụ
+      }
       if (sort_by !== 'appointment_date') {
-        sortObj.appointment_date = 1;
+        sortObj.appointment_date = 1; // Giữ nguyên sort theo ngày hẹn
       }
       if (sort_by !== 'appointment_time') {
-        sortObj.appointment_time = 1;
+        sortObj.appointment_time = 1; // Giữ nguyên sort theo giờ hẹn
       }
 
       // Pagination
@@ -215,7 +218,7 @@ class AdminAppointmentController {
     }
   }
 
-  // Lấy thống kê lịch hẹn
+  // Lấy thống kê lịch hẹn - UPDATED: Thêm no-show
   async getAppointmentStats(filter = {}) {
     try {
       const stats = await Appointment.aggregate([
@@ -234,7 +237,8 @@ class AdminAppointmentController {
         confirmed: { count: 0, totalAmount: 0 },
         in_progress: { count: 0, totalAmount: 0 },
         completed: { count: 0, totalAmount: 0 },
-        cancelled: { count: 0, totalAmount: 0 }
+        cancelled: { count: 0, totalAmount: 0 },
+        'no-show': { count: 0, totalAmount: 0 } // ADDED: no-show status
       };
 
       stats.forEach(stat => {
@@ -253,7 +257,7 @@ class AdminAppointmentController {
     }
   }
 
-  // Cập nhật trạng thái lịch hẹn và phân công nhân viên
+  // Cập nhật trạng thái lịch hẹn và phân công nhân viên - UPDATED: Thêm no-show validation
   async updateAppointmentStatus(req, res) {
     try {
       const { id } = req.params;
@@ -279,8 +283,8 @@ class AdminAppointmentController {
         });
       }
 
-      // Validate status
-      const validStatuses = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled'];
+      // Validate status - UPDATED: Thêm no-show
+      const validStatuses = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show'];
       if (status && !validStatuses.includes(status)) {
         return res.status(400).json({
           success: false,
@@ -303,14 +307,22 @@ class AdminAppointmentController {
         }
       }
 
-      // Kiểm tra business rules
+      // Kiểm tra business rules - UPDATED: Bổ sung logic cho no-show
       if (status) {
-        // Không thể chuyển từ completed/cancelled sang trạng thái khác
-        if (['completed', 'cancelled'].includes(appointment.status) && 
+        // Không thể chuyển từ completed/cancelled/no-show sang trạng thái khác
+        if (['completed', 'cancelled', 'no-show'].includes(appointment.status) && 
             appointment.status !== status) {
           return res.status(400).json({
             success: false,
             message: `Không thể thay đổi trạng thái từ ${appointment.status} sang ${status}`
+          });
+        }
+
+        // No-show chỉ có thể chuyển từ confirmed hoặc in_progress
+        if (status === 'no-show' && !['confirmed', 'in_progress'].includes(appointment.status)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Chỉ có thể đánh dấu No-show từ trạng thái Đã xác nhận hoặc Đang thực hiện'
           });
         }
 
@@ -324,14 +336,14 @@ class AdminAppointmentController {
         }
       }
 
-      // Kiểm tra xung đột lịch hẹn khi phân công staff
-      if (staff_id && status !== 'cancelled') {
+      // Kiểm tra xung đột lịch hẹn khi phân công staff - UPDATED: Thêm no-show vào excluded statuses
+      if (staff_id && !['cancelled', 'no-show'].includes(status)) {
         const conflictAppointment = await Appointment.findOne({
           _id: { $ne: id },
           staff_id: staff_id,
           appointment_date: appointment.appointment_date,
           appointment_time: appointment.appointment_time,
-          status: { $nin: ['cancelled'] }
+          status: { $nin: ['cancelled', 'no-show'] }
         });
 
         if (conflictAppointment) {
@@ -513,11 +525,11 @@ async getAvailableStaff(req, res) {
         // Debug: Log danh sách nhân viên
         console.log('All Staff:', allStaff);
 
-        // Lấy staff đã có lịch hẹn trong khung giờ này
+        // Lấy staff đã có lịch hẹn trong khung giờ này - UPDATED: Thêm no-show vào excluded statuses
         const busyStaff = await Appointment.find({
             appointment_date: new Date(appointment_date),
             appointment_time: appointment_time,
-            status: { $nin: ['cancelled'] },
+            status: { $nin: ['cancelled', 'no-show'] },
             staff_id: { $exists: true, $ne: null }
         }).distinct('staff_id');
 
@@ -547,6 +559,7 @@ async getAvailableStaff(req, res) {
         });
     }
 }
+
 async assignStaffToAppointment(req, res) {
     try {
         const { id } = req.params;
@@ -578,13 +591,13 @@ async assignStaffToAppointment(req, res) {
                 });
             }
 
-            // Kiểm tra xung đột lịch hẹn
+            // Kiểm tra xung đột lịch hẹn - UPDATED: Thêm no-show vào excluded statuses
             const conflictAppointment = await Appointment.findOne({
                 _id: { $ne: id },
                 staff_id: staff_id,
                 appointment_date: appointment.appointment_date,
                 appointment_time: appointment.appointment_time,
-                status: { $nin: ['cancelled'] }
+                status: { $nin: ['cancelled', 'no-show'] }
             });
 
             if (conflictAppointment) {
