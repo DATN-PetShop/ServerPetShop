@@ -287,16 +287,91 @@ class StatisticsController {
     }
   }
 
-  // ===============================
-  // 🚀 ENHANCED INVENTORY STATISTICS WITH 4 TABS
-  // ===============================
- // Fixed getInventoryStatistics method - Comprehensive data retrieval
 async getInventoryStatistics(req, res) {
   try {
     console.log('📦🔄 Getting COMPREHENSIVE inventory statistics...');
 
     // ========================================
-    // 1. 🐕 INVENTORY BY BREED (Enhanced & Fixed)
+    // 🔧 FIX 1: TỰ DYNAMIC GET SOLD PETS DATA TỪ ORDERITEMS
+    // ========================================
+    
+    // Lấy dữ liệu bán hàng thực tế từ OrderItems
+    const soldPetsData = await OrderItem.aggregate([
+      {
+        $match: {
+          pet_id: { $ne: null } // Chỉ lấy OrderItem có pet_id
+        }
+      },
+      {
+        $lookup: {
+          from: 'orders',
+          localField: 'order_id',
+          foreignField: '_id',
+          as: 'order'
+        }
+      },
+      { $unwind: '$order' },
+      {
+        $match: {
+          'order.status': { $in: ['completed', 'delivered'] } // Chỉ tính đơn hoàn thành
+        }
+      },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
+      },
+      { $unwind: '$pet' },
+      {
+        $lookup: {
+          from: 'breeds',
+          localField: 'pet.breed_id',
+          foreignField: '_id',
+          as: 'breed'
+        }
+      },
+      { $unwind: { path: '$breed', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: {
+            breedId: '$breed._id',
+            breedName: '$breed.name'
+          },
+          soldPetsCount: { $sum: '$quantity' }, // 🔧 FIX: Tính theo quantity
+          soldPetIds: { $addToSet: '$pet_id' }, // Track unique pet IDs sold
+          totalRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] } }
+        }
+      },
+      {
+        $project: {
+          breedId: '$_id.breedId',
+          breedName: '$_id.breedName',
+          soldPetsCount: 1,
+          uniquePetsSold: { $size: '$soldPetIds' }, // Number of unique pets sold
+          totalRevenue: 1
+        }
+      }
+    ]);
+
+    console.log('📊 Sold pets data:', soldPetsData.length, 'breeds with sales');
+
+    // Tạo map để lookup nhanh
+    const soldPetsMap = new Map();
+    soldPetsData.forEach(item => {
+      if (item.breedId) {
+        soldPetsMap.set(item.breedId.toString(), {
+          soldPetsCount: item.soldPetsCount,
+          uniquePetsSold: item.uniquePetsSold,
+          totalRevenue: item.totalRevenue
+        });
+      }
+    });
+
+    // ========================================
+    // 🔧 FIX 2: INVENTORY BY BREED - Kết hợp data thực tế
     // ========================================
     const inventoryByBreed = await Pet.aggregate([
       {
@@ -325,13 +400,10 @@ async getInventoryStatistics(req, res) {
           categoryName: { $first: { $ifNull: ['$category.name', 'Chưa phân loại'] } },
           categoryId: { $first: '$category._id' },
           
-          // Thống kê số lượng
+          // Thống kê số lượng từ Pet collection
           totalPets: { $sum: 1 },
           availablePets: {
             $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
-          },
-          soldPets: {
-            $sum: { $cond: [{ $eq: ['$status', 'sold'] }, 1, 0] }
           },
           reservedPets: {
             $sum: { $cond: [{ $eq: ['$status', 'reserved'] }, 1, 0] }
@@ -343,132 +415,124 @@ async getInventoryStatistics(req, res) {
           maxPrice: { $max: '$price' },
           totalValue: { $sum: '$price' },
           
-          // Thống kê bán hàng
-          potentialRevenue: {
-            $sum: {
-              $cond: [{ $eq: ['$status', 'available'] }, '$price', 0]
-            }
-          },
-          
-          // Collect pet details for debugging
-          petIds: { $addToSet: '$_id' }
-        }
-      },
-      {
-        $addFields: {
-          // Tính tỷ lệ phần trăm
-          availabilityRate: {
-            $cond: [
-              { $eq: ['$totalPets', 0] },
-              0,
-              { $multiply: [{ $divide: ['$availablePets', '$totalPets'] }, 100] }
-            ]
-          },
-          soldRate: {
-            $cond: [
-              { $eq: ['$totalPets', 0] },
-              0,
-              { $multiply: [{ $divide: ['$soldPets', '$totalPets'] }, 100] }
-            ]
-          },
-          priceRange: {
-            $subtract: ['$maxPrice', '$minPrice']
-          }
+          // Collect pet IDs for debugging
+          allPetIds: { $addToSet: '$_id' }
         }
       },
       {
         $project: {
-          petIds: 0 // Remove this field from output for cleaner data
+          breedId: 1,
+          breedName: 1,
+          categoryName: 1,
+          categoryId: 1,
+          totalPets: 1,
+          availablePets: 1,
+          reservedPets: 1,
+          averagePrice: 1,
+          minPrice: 1,
+          maxPrice: 1,
+          totalValue: 1,
+          allPetIds: 1
         }
       },
       { $sort: { totalPets: -1, breedName: 1 } }
     ]);
 
-    console.log(`✅ Breed analysis: Found ${inventoryByBreed.length} breeds`);
+    // 🔧 FIX 3: Merge sold data với inventory data
+    const enrichedInventoryByBreed = inventoryByBreed.map(breed => {
+      const breedIdStr = breed.breedId ? breed.breedId.toString() : null;
+      const soldData = breedIdStr ? soldPetsMap.get(breedIdStr) : null;
+      
+      return {
+        ...breed,
+        // 🔧 FIX: Sử dụng dữ liệu bán hàng thực tế
+        soldPets: soldData ? soldData.soldPetsCount : 0,
+        uniquePetsSold: soldData ? soldData.uniquePetsSold : 0,
+        soldRevenue: soldData ? soldData.totalRevenue : 0,
+        
+        // Tính toán các tỷ lệ
+        availabilityRate: breed.totalPets > 0 
+          ? Math.round((breed.availablePets / breed.totalPets) * 100) 
+          : 0,
+        soldRate: breed.totalPets > 0 && soldData 
+          ? Math.round((soldData.soldPetsCount / breed.totalPets) * 100) 
+          : 0,
+        priceRange: breed.maxPrice - breed.minPrice,
+        
+        // Revenue per pet sold
+        averageRevenuePerPet: soldData && soldData.soldPetsCount > 0
+          ? Math.round(soldData.totalRevenue / soldData.soldPetsCount)
+          : 0
+      };
+    });
+
+    console.log(`✅ Breed analysis: Found ${enrichedInventoryByBreed.length} breeds`);
+    
+    // Debug log để kiểm tra
+    const breedsWithSales = enrichedInventoryByBreed.filter(breed => breed.soldPets > 0);
+    console.log(`🎯 Breeds with actual sales: ${breedsWithSales.length}`);
+    if (breedsWithSales.length > 0) {
+      console.log('📋 Sample breeds with sales:', breedsWithSales.slice(0, 3).map(b => ({
+        name: b.breedName,
+        total: b.totalPets,
+        sold: b.soldPets,
+        revenue: b.soldRevenue
+      })));
+    }
 
     // ========================================
-    // 2. 📂 INVENTORY BY CATEGORY (Enhanced & Fixed)
+    // 🔧 FIX 4: INVENTORY BY CATEGORY - Tính lại soldPets
     // ========================================
-    const inventoryByCategory = await Pet.aggregate([
-      {
-        $lookup: {
-          from: 'breeds',
-          localField: 'breed_id',
-          foreignField: '_id',
-          as: 'breed'
-        }
-      },
-      { $unwind: { path: '$breed', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'breed.category_id',
-          foreignField: '_id',
-          as: 'category'
-        }
-      },
-      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
-      {
-        $group: {
-          _id: '$category._id',
-          categoryId: { $first: '$category._id' },
-          categoryName: { $first: { $ifNull: ['$category.name', 'Chưa phân loại'] } },
-          description: { $first: '$category.description' },
-          
-          // Thống kê số lượng
-          totalPets: { $sum: 1 },
-          availablePets: {
-            $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
-          },
-          soldPets: {
-            $sum: { $cond: [{ $eq: ['$status', 'sold'] }, 1, 0] }
-          },
-          reservedPets: {
-            $sum: { $cond: [{ $eq: ['$status', 'reserved'] }, 1, 0] }
-          },
-          
-          // Thống kê giá cả
-          averagePrice: { $avg: '$price' },
-          minPrice: { $min: '$price' },
-          maxPrice: { $max: '$price' },
-          totalValue: { $sum: '$price' },
-          
-          // Thống kê breed đa dạng
-          uniqueBreeds: { $addToSet: '$breed._id' }
-        }
-      },
-      {
-        $addFields: {
-          availabilityRate: {
-            $cond: [
-              { $eq: ['$totalPets', 0] },
-              0,
-              { $multiply: [{ $divide: ['$availablePets', '$totalPets'] }, 100] }
-            ]
-          },
-          soldRate: {
-            $cond: [
-              { $eq: ['$totalPets', 0] },
-              0,
-              { $multiply: [{ $divide: ['$soldPets', '$totalPets'] }, 100] }
-            ]
-          },
-          breedDiversity: { $size: '$uniqueBreeds' }
-        }
-      },
-      {
-        $project: {
-          uniqueBreeds: 0 // Remove for cleaner output
-        }
-      },
-      { $sort: { totalPets: -1, categoryName: 1 } }
-    ]);
+    const inventoryByCategory = enrichedInventoryByBreed.reduce((acc, breed) => {
+      const existingCategory = acc.find(cat => cat.categoryName === breed.categoryName);
+      
+      if (existingCategory) {
+        existingCategory.totalPets += breed.totalPets;
+        existingCategory.availablePets += breed.availablePets;
+        existingCategory.soldPets += breed.soldPets; // 🔧 FIX: Cộng dồn từ breed data
+        existingCategory.reservedPets += breed.reservedPets;
+        existingCategory.totalValue += breed.totalValue;
+        existingCategory.soldRevenue += breed.soldRevenue;
+        existingCategory.breeds.push(breed.breedName);
+      } else {
+        acc.push({
+          _id: breed.categoryId,
+          categoryId: breed.categoryId,
+          categoryName: breed.categoryName,
+          totalPets: breed.totalPets,
+          availablePets: breed.availablePets,
+          soldPets: breed.soldPets, // 🔧 FIX: Từ breed data
+          reservedPets: breed.reservedPets,
+          totalValue: breed.totalValue,
+          soldRevenue: breed.soldRevenue,
+          breeds: [breed.breedName],
+          breedCount: 1
+        });
+      }
+      return acc;
+    }, []);
+
+    // Tính average price và các metrics cho category
+    inventoryByCategory.forEach(category => {
+      category.averagePrice = category.totalPets > 0 
+        ? Math.round(category.totalValue / category.totalPets) 
+        : 0;
+      category.availabilityRate = category.totalPets > 0 
+        ? Math.round((category.availablePets / category.totalPets) * 100) 
+        : 0;
+      category.soldRate = category.totalPets > 0 
+        ? Math.round((category.soldPets / category.totalPets) * 100) 
+        : 0;
+      category.breedCount = category.breeds.length;
+    });
 
     console.log(`✅ Category analysis: Found ${inventoryByCategory.length} categories`);
 
     // ========================================
-    // 3. 🛍️ INVENTORY BY PRODUCT (Enhanced & Fixed)
+    // REST OF THE CODE UNCHANGED...
     // ========================================
+    
+    // Keep existing product inventory logic
     const inventoryByProduct = await Product.aggregate([
       {
         $lookup: {
@@ -551,52 +615,16 @@ async getInventoryStatistics(req, res) {
 
     console.log(`✅ Product analysis: Found ${inventoryByProduct.length} products`);
 
-    // ========================================
-    // 4. 🐾 TOP PETS SELLING (Enhanced)
-    // ========================================
-    const topPets = await OrderItem.aggregate([
-      { $match: { pet_id: { $ne: null } } },
-      {
-        $lookup: {
-          from: 'orders',
-          localField: 'order_id',
-          foreignField: '_id',
-          as: 'order'
-        }
-      },
-      { $unwind: '$order' },
-      { $match: { 'order.status': 'completed' } },
-      {
-        $group: {
-          _id: '$pet_id',
-          totalSold: { $sum: '$quantity' },
-          totalRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] } },
-          averagePrice: { $avg: '$unit_price' },
-          orderCount: { $sum: 1 },
-          uniqueCustomers: { $addToSet: '$order.user_id' }
-        }
-      },
-      {
-        $addFields: {
-          customerCount: { $size: '$uniqueCustomers' },
-          revenuePerCustomer: {
-            $cond: [
-              { $eq: [{ $size: '$uniqueCustomers' }, 0] },
-              0,
-              { $divide: ['$totalRevenue', { $size: '$uniqueCustomers' }] }
-            ]
-          }
-        }
-      },
-      { $sort: { totalSold: -1 } },
-      { $limit: 20 }
-    ]);
+    // Keep existing top pets logic but use actual sold data
+    const topPets = soldPetsData
+      .sort((a, b) => b.soldPetsCount - a.soldPetsCount)
+      .slice(0, 20);
 
     // Populate pet details for top pets
     const populatedTopPets = await Promise.all(
       topPets.map(async (item) => {
         try {
-          const pet = await Pet.findById(item._id)
+          const pets = await Pet.find({ breed_id: item.breedId })
             .populate({
               path: 'breed_id',
               select: 'name category_id',
@@ -605,9 +633,11 @@ async getInventoryStatistics(req, res) {
                 select: 'name'
               }
             })
+            .limit(1)
             .lean();
           
-          if (pet) {
+          if (pets.length > 0) {
+            const pet = pets[0];
             // Get pet images
             const images = await Image.find({ pet_id: pet._id }).lean();
             
@@ -631,65 +661,23 @@ async getInventoryStatistics(req, res) {
     const validTopPets = populatedTopPets.filter(item => item !== null);
     console.log(`✅ Top pets analysis: Found ${validTopPets.length} selling pets`);
 
-    // ========================================
-    // 5. 🚨 BREED ALERTS (Enhanced)
-    // ========================================
-    const breedAlerts = await Pet.aggregate([
-      {
-        $lookup: {
-          from: 'breeds',
-          localField: 'breed_id',
-          foreignField: '_id',
-          as: 'breed'
-        }
-      },
-      { $unwind: { path: '$breed', preserveNullAndEmptyArrays: true } },
-      {
-        $group: {
-          _id: '$breed._id',
-          breedName: { $first: { $ifNull: ['$breed.name', 'Không xác định'] } },
-          availableCount: {
-            $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
-          },
-          totalCount: { $sum: 1 },
-          soldCount: {
-            $sum: { $cond: [{ $eq: ['$status', 'sold'] }, 1, 0] }
-          }
-        }
-      },
-      {
-        $match: {
-          $or: [
-            { availableCount: { $lte: 2 } }, // Ít hơn 2 con có sẵn
-            { availableCount: 0 } // Hết hàng
-          ]
-        }
-      },
-      {
-        $addFields: {
-          alertLevel: {
-            $cond: [
-              { $eq: ['$availableCount', 0] },
-              'critical', // Hết hàng hoàn toàn
-              'warning'   // Sắp hết hàng
-            ]
-          },
-          availabilityPercentage: {
-            $cond: [
-              { $eq: ['$totalCount', 0] },
-              0,
-              { $multiply: [{ $divide: ['$availableCount', '$totalCount'] }, 100] }
-            ]
-          }
-        }
-      },
-      { $sort: { availableCount: 1, totalCount: -1 } }
-    ]);
+    // Keep existing alert logic
+    const breedAlerts = enrichedInventoryByBreed.filter(breed => 
+      breed.availablePets <= 2 || breed.availablePets === 0
+    ).map(breed => ({
+      _id: breed.breedId,
+      breedName: breed.breedName,
+      availableCount: breed.availablePets,
+      totalCount: breed.totalPets,
+      soldCount: breed.soldPets,
+      alertLevel: breed.availablePets === 0 ? 'critical' : 'warning',
+      availabilityPercentage: breed.availabilityRate
+    }));
 
     console.log(`✅ Alert analysis: Found ${breedAlerts.length} breeds needing attention`);
 
     // ========================================
-    // 6. 📊 COMPREHENSIVE SUMMARY STATISTICS
+    // 🔧 FIX 5: UPDATED SUMMARY với dữ liệu chính xác
     // ========================================
     
     // Get total counts from database directly for accuracy
@@ -700,7 +688,7 @@ async getInventoryStatistics(req, res) {
       Pet.countDocuments()
     ]);
 
-    // Calculate derived statistics
+    // Calculate derived statistics với sold data thực tế
     const summary = {
       // Core counts
       totalBreeds: totalBreedsCount,
@@ -708,17 +696,17 @@ async getInventoryStatistics(req, res) {
       totalProducts: totalProductsCount,
       totalPets: totalPetsCount,
       
-      // Pet status breakdown
-      totalAvailable: inventoryByBreed.reduce((sum, breed) => sum + breed.availablePets, 0),
-      totalSold: inventoryByBreed.reduce((sum, breed) => sum + breed.soldPets, 0),
-      totalReserved: inventoryByBreed.reduce((sum, breed) => sum + breed.reservedPets, 0),
+      // Pet status breakdown - 🔧 FIX: từ enriched data
+      totalAvailable: enrichedInventoryByBreed.reduce((sum, breed) => sum + breed.availablePets, 0),
+      totalSold: enrichedInventoryByBreed.reduce((sum, breed) => sum + breed.soldPets, 0), // 🔧 FIX
+      totalReserved: enrichedInventoryByBreed.reduce((sum, breed) => sum + breed.reservedPets, 0),
       
       // Financial metrics
-      totalValue: inventoryByBreed.reduce((sum, breed) => sum + breed.totalValue, 0),
-      averagePetPrice: inventoryByBreed.length > 0 
-        ? inventoryByBreed.reduce((sum, breed) => sum + breed.averagePrice, 0) / inventoryByBreed.length 
+      totalValue: enrichedInventoryByBreed.reduce((sum, breed) => sum + breed.totalValue, 0),
+      averagePetPrice: enrichedInventoryByBreed.length > 0 
+        ? enrichedInventoryByBreed.reduce((sum, breed) => sum + breed.averagePrice, 0) / enrichedInventoryByBreed.length 
         : 0,
-      potentialRevenue: inventoryByBreed.reduce((sum, breed) => sum + breed.potentialRevenue, 0),
+      totalSoldRevenue: enrichedInventoryByBreed.reduce((sum, breed) => sum + breed.soldRevenue, 0), // 🔧 FIX
       
       // Alert metrics
       alertCount: breedAlerts.length,
@@ -731,43 +719,28 @@ async getInventoryStatistics(req, res) {
       activeProducts: inventoryByProduct.filter(product => product.status === 'active').length,
       lowStockProducts: inventoryByProduct.filter(product => (product.totalStock || 0) < 10).length,
       
-      // Category metrics
-      mostDiverseCategory: inventoryByCategory.reduce((prev, current) => 
-        (current.breedDiversity > (prev.breedDiversity || 0)) ? current : prev, {}
-      ),
-      
-      // Performance metrics
-      averageBreedsPerCategory: totalCategoriesCount > 0 ? Math.round(totalBreedsCount / totalCategoriesCount) : 0,
-      averagePetsPerBreed: totalBreedsCount > 0 ? Math.round(totalPetsCount / totalBreedsCount) : 0,
+      // Performance metrics - 🔧 FIX
       overallAvailabilityRate: totalPetsCount > 0 
-        ? Math.round((inventoryByBreed.reduce((sum, breed) => sum + breed.availablePets, 0) / totalPetsCount) * 100) 
+        ? Math.round((enrichedInventoryByBreed.reduce((sum, breed) => sum + breed.availablePets, 0) / totalPetsCount) * 100) 
+        : 0,
+      overallSoldRate: totalPetsCount > 0 
+        ? Math.round((enrichedInventoryByBreed.reduce((sum, breed) => sum + breed.soldPets, 0) / totalPetsCount) * 100) 
         : 0
     };
 
     console.log('✅ COMPREHENSIVE inventory statistics compiled successfully');
-    console.log(`📊 Summary: ${totalCategoriesCount} categories, ${totalBreedsCount} breeds, ${totalPetsCount} pets, ${totalProductsCount} products`);
-    
-    // ========================================
-    // 7. ADDITIONAL INSIGHTS
-    // ========================================
-    
-    // Get category-breed mapping for frontend
-    const categoryBreedMapping = inventoryByCategory.map(cat => ({
-      categoryId: cat.categoryId,
-      categoryName: cat.categoryName,
-      breeds: inventoryByBreed.filter(breed => breed.categoryName === cat.categoryName),
-      breedCount: inventoryByBreed.filter(breed => breed.categoryName === cat.categoryName).length
-    }));
+    console.log(`📊 Summary: ${totalCategoriesCount} categories, ${totalBreedsCount} breeds, ${totalPetsCount} pets`);
+    console.log(`🎯 Sales: ${summary.totalSold} pets sold, ${summary.overallSoldRate}% sold rate`);
 
     res.status(200).json({
       success: true,
       statusCode: 200,
-      message: 'Comprehensive inventory statistics retrieved successfully',
+      message: 'Comprehensive inventory statistics retrieved successfully with accurate sold data',
       data: {
-        // 🐕 Breed Tab Data
-        inventoryByBreed,
+        // 🐕 Breed Tab Data - 🔧 FIX: với soldPets chính xác
+        inventoryByBreed: enrichedInventoryByBreed,
         
-        // 📂 Category Tab Data  
+        // 📂 Category Tab Data - 🔧 FIX: với soldPets tính lại  
         inventoryByCategory,
         
         // 🛍️ Product Tab Data
@@ -779,41 +752,25 @@ async getInventoryStatistics(req, res) {
         // 🚨 Alerts
         breedAlerts,
         
-        // 📊 Summary
+        // 📊 Summary - 🔧 FIX: với sold data chính xác
         summary,
         
-        // 🗺️ Mapping for hierarchical display
-        categoryBreedMapping,
-
-        // Legacy fields for backward compatibility
-        petsByType: inventoryByCategory.map(cat => ({
-          _id: cat.categoryName,
-          count: cat.totalPets,
-          averagePrice: cat.averagePrice,
-          available: cat.availablePets,
-          sold: cat.soldPets,
-          reserved: cat.reservedPets
-        })),
-        
-        lowStockProducts: inventoryByProduct.filter(product => 
-          (product.totalStock || 0) < 10
-        ).slice(0, 10),
-        
-        // Variant stats placeholder - would need PetVariant aggregation
-        variantStats: {
-          totalVariants: 0, 
-          availableVariants: 0,
-          averagePriceAdjustment: 0,
-          totalStock: 0
+        // Debug info
+        debug: {
+          totalSoldEntries: soldPetsData.length,
+          breedsWithSales: breedsWithSales.length,
+          soldPetsCalculationMethod: 'from_order_items'
         }
       },
       metadata: {
-        analysis_type: 'comprehensive_multi_tab',
+        analysis_type: 'comprehensive_multi_tab_with_accurate_sold_data',
+        calculation_method: 'order_items_based_sold_calculation',
         data_sources: {
           pets_analyzed: totalPetsCount,
           breeds_analyzed: totalBreedsCount,
           categories_analyzed: totalCategoriesCount,
-          products_analyzed: totalProductsCount
+          products_analyzed: totalProductsCount,
+          sold_data_entries: soldPetsData.length
         },
         alert_summary: {
           total_alerts: breedAlerts.length,
@@ -822,11 +779,10 @@ async getInventoryStatistics(req, res) {
         },
         performance_metrics: {
           overall_availability_rate: summary.overallAvailabilityRate,
-          avg_breeds_per_category: summary.averageBreedsPerCategory,
-          avg_pets_per_breed: summary.averagePetsPerBreed
+          overall_sold_rate: summary.overallSoldRate,
+          total_revenue_from_pets: summary.totalSoldRevenue
         },
-        generated_at: new Date().toISOString(),
-        query_execution_time: Date.now()
+        generated_at: new Date().toISOString()
       }
     });
     
@@ -1716,423 +1672,423 @@ async getProfitByPeriod(req, res) {
   }
 }
 
-async getProfitByProducts(req, res) {
-  try {
-    const { limit = 20, type = 'all' } = req.query;
-    
-    console.log(`🛍️ Getting profit by products (${type}, limit: ${limit})`);
+  async getProfitByProducts(req, res) {
+    try {
+      const { limit = 20, type = 'all' } = req.query;
+      
+      console.log(`🛍️ Getting profit by products (${type}, limit: ${limit})`);
 
-    const profitByProducts = await OrderItem.aggregate([
-      {
-        $lookup: {
-          from: 'orders',
-          localField: 'order_id',
-          foreignField: '_id',
-          as: 'order'
-        }
-      },
-      { $unwind: '$order' },
-      {
-        $match: {
-          'order.status': { $in: ['completed', 'delivered'] }
-        }
-      },
-      {
-        $lookup: {
-          from: 'pets',
-          localField: 'pet_id',
-          foreignField: '_id',
-          as: 'pet'
-        }
-      },
-      {
-        $lookup: {
-          from: 'products',
-          localField: 'product_id',
-          foreignField: '_id',
-          as: 'product'
-        }
-      },
-      {
-        $lookup: {
-          from: 'petvariants',
-          localField: 'variant_id',
-          foreignField: '_id',
-          as: 'variant'
-        }
-      },
-      {
-        $addFields: {
-          itemType: {
-            $cond: [
-              { $gt: [{ $size: '$pet' }, 0] }, 'pet',
-              {
-                $cond: [
-                  { $gt: [{ $size: '$product' }, 0] }, 'product',
-                  'variant'
-                ]
-              }
-            ]
-          },
-          itemInfo: {
-            $cond: [
-              { $gt: [{ $size: '$pet' }, 0] },
-              { $arrayElemAt: ['$pet', 0] },
-              {
-                $cond: [
-                  { $gt: [{ $size: '$product' }, 0] },
-                  { $arrayElemAt: ['$product', 0] },
-                  { $arrayElemAt: ['$variant', 0] }
-                ]
-              }
-            ]
-          },
-          // 🔧 FIX: Sử dụng purchase_price cho Product
-          itemCostPrice: {
-            $cond: [
-              { $gt: [{ $size: '$pet' }, 0] },
-              { $multiply: ['$quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-              {
-                $cond: [
-                  { $gt: [{ $size: '$product' }, 0] },
-                  // 🔧 FIX: Sử dụng purchase_price thay vì price * 0.7
-                  { 
-                    $multiply: [
-                      '$quantity', 
-                      {
-                        $ifNull: [
-                          { $arrayElemAt: ['$product.purchase_price', 0] },
-                          { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
-                        ]
-                      }
-                    ] 
-                  },
-                  {
-                    $cond: [
-                      { $gt: [{ $size: '$variant' }, 0] },
-                      // Variant: Cần lookup thêm Pet để lấy price
-                      { $multiply: ['$quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                      // Fallback case - có thể cần điều chỉnh
-                      { $multiply: ['$quantity', { $multiply: ['$unit_price', 0.7] }] }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          itemRevenue: { $multiply: ['$quantity', '$unit_price'] }
-        }
-      },
-      {
-        $group: {
-          _id: {
-            itemId: {
+      const profitByProducts = await OrderItem.aggregate([
+        {
+          $lookup: {
+            from: 'orders',
+            localField: 'order_id',
+            foreignField: '_id',
+            as: 'order'
+          }
+        },
+        { $unwind: '$order' },
+        {
+          $match: {
+            'order.status': { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $lookup: {
+            from: 'pets',
+            localField: 'pet_id',
+            foreignField: '_id',
+            as: 'pet'
+          }
+        },
+        {
+          $lookup: {
+            from: 'products',
+            localField: 'product_id',
+            foreignField: '_id',
+            as: 'product'
+          }
+        },
+        {
+          $lookup: {
+            from: 'petvariants',
+            localField: 'variant_id',
+            foreignField: '_id',
+            as: 'variant'
+          }
+        },
+        {
+          $addFields: {
+            itemType: {
               $cond: [
-                { $gt: [{ $size: '$pet' }, 0] }, '$pet_id',
+                { $gt: [{ $size: '$pet' }, 0] }, 'pet',
                 {
                   $cond: [
-                    { $gt: [{ $size: '$product' }, 0] }, '$product_id',
-                    '$variant_id'
+                    { $gt: [{ $size: '$product' }, 0] }, 'product',
+                    'variant'
                   ]
                 }
               ]
             },
-            itemType: '$itemType'
-          },
-          itemInfo: { $first: '$itemInfo' },
-          totalRevenue: { $sum: '$itemRevenue' },
-          totalCostPrice: { $sum: '$itemCostPrice' },
-          totalQuantitySold: { $sum: '$quantity' },
-          totalOrders: { $addToSet: '$order_id' }
-        }
-      },
-      {
-        $project: {
-          itemInfo: 1,
-          itemType: '$_id.itemType',
-          totalRevenue: 1,
-          totalCostPrice: 1,
-          totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
-          profitMargin: {
-            $cond: [
-              { $gt: ['$totalRevenue', 0] },
-              {
-                $multiply: [
-                  { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
-                  100
-                ]
-              },
-              0
-            ]
-          },
-          totalQuantitySold: 1,
-          totalOrders: { $size: '$totalOrders' }
-        }
-      },
-      { $sort: { totalProfit: -1 } },
-      { $limit: parseInt(limit) }
-    ]);
-
-    console.log(`✅ Found ${profitByProducts.length} products with profit data`);
-
-    res.status(200).json({
-      success: true,
-      statusCode: 200,
-      message: 'Profit by products retrieved successfully',
-      data: profitByProducts
-    });
-
-  } catch (error) {
-    console.error('❌ Profit by products error:', error);
-    res.status(500).json({
-      success: false,
-      statusCode: 500,
-      message: 'Internal server error',
-      data: null
-    });
-  }
-}
-
-async getCurrentInventoryValue(req, res) {
-  try {
-    console.log('🏪 Getting current inventory value...');
-
-    // Tính tổng giá trị vốn của pets hiện có
-    const petInventory = await Pet.aggregate([
-      { $match: { status: 'available' } },
-      {
-        $group: {
-          _id: null,
-          totalPets: { $sum: 1 },
-          totalValue: { $sum: '$price' } // Pet.price = cost price (giá nhập)
-        }
-      }
-    ]);
-
-    // 🔧 FIX: Tính tổng giá trị vốn của variants - lookup Pet để lấy price
-    const variantInventory = await PetVariant.aggregate([
-      { 
-        $match: { 
-          is_available: true, 
-          stock_quantity: { $gt: 0 }
-        } 
-      },
-      {
-        $lookup: {
-          from: 'pets',
-          localField: 'pet_id',
-          foreignField: '_id',
-          as: 'pet'
-        }
-      },
-      { $unwind: '$pet' },
-      {
-        $group: {
-          _id: null,
-          totalVariants: { $sum: '$stock_quantity' },
-          // 🔧 FIX: Dùng pet.price + price_adjustment cho variant
-          totalValue: { 
-            $sum: { 
-              $multiply: [
-                '$stock_quantity', 
-                { $add: ['$pet.price', { $ifNull: ['$price_adjustment', 0] }] }
-              ] 
-            } 
-          }
-        }
-      }
-    ]);
-
-    // 🔧 FIX: Tính tổng giá trị vốn của products với purchase_price
-    const productInventory = await Product.aggregate([
-      { 
-        $match: { 
-          status: 'active', 
-          stock: { $gt: 0 }
-        } 
-      },
-      {
-        $group: {
-          _id: null,
-          totalProducts: { $sum: '$stock' },
-          // 🔧 FIX: Sử dụng purchase_price thay vì price * 0.7
-          totalValue: { 
-            $sum: { 
-              $multiply: [
-                '$stock', 
+            itemInfo: {
+              $cond: [
+                { $gt: [{ $size: '$pet' }, 0] },
+                { $arrayElemAt: ['$pet', 0] },
                 {
-                  $ifNull: ['$purchase_price', { $multiply: ['$price', 0.7] }] // Fallback nếu không có purchase_price
+                  $cond: [
+                    { $gt: [{ $size: '$product' }, 0] },
+                    { $arrayElemAt: ['$product', 0] },
+                    { $arrayElemAt: ['$variant', 0] }
+                  ]
                 }
-              ] 
-            } 
+              ]
+            },
+            // 🔧 FIX: Sử dụng purchase_price cho Product
+            itemCostPrice: {
+              $cond: [
+                { $gt: [{ $size: '$pet' }, 0] },
+                { $multiply: ['$quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+                {
+                  $cond: [
+                    { $gt: [{ $size: '$product' }, 0] },
+                    // 🔧 FIX: Sử dụng purchase_price thay vì price * 0.7
+                    { 
+                      $multiply: [
+                        '$quantity', 
+                        {
+                          $ifNull: [
+                            { $arrayElemAt: ['$product.purchase_price', 0] },
+                            { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
+                          ]
+                        }
+                      ] 
+                    },
+                    {
+                      $cond: [
+                        { $gt: [{ $size: '$variant' }, 0] },
+                        // Variant: Cần lookup thêm Pet để lấy price
+                        { $multiply: ['$quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+                        // Fallback case - có thể cần điều chỉnh
+                        { $multiply: ['$quantity', { $multiply: ['$unit_price', 0.7] }] }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            itemRevenue: { $multiply: ['$quantity', '$unit_price'] }
           }
-        }
-      }
-    ]);
-
-    // Debug logging để kiểm tra
-    console.log('🐕 Pet inventory:', petInventory);
-    console.log('🎭 Variant inventory:', variantInventory);  
-    console.log('📦 Product inventory:', productInventory);
-
-    const result = {
-      pets: petInventory[0] || { totalPets: 0, totalValue: 0 },
-      variants: variantInventory[0] || { totalVariants: 0, totalValue: 0 },
-      products: productInventory[0] || { totalProducts: 0, totalValue: 0 }
-    };
-
-    // Tính tổng cộng
-    result.summary = {
-      totalItems: result.pets.totalPets + result.variants.totalVariants + result.products.totalProducts,
-      totalInventoryValue: result.pets.totalValue + result.variants.totalValue + result.products.totalValue
-    };
-
-    console.log('✅ Inventory value calculated:', {
-      pets: result.pets.totalPets,
-      variants: result.variants.totalVariants,
-      products: result.products.totalProducts,
-      totalValue: result.summary.totalInventoryValue
-    });
-
-    // Debug: Log sample products để kiểm tra purchase_price field
-    const sampleProducts = await Product.find({ status: 'active' })
-      .limit(3)
-      .select('name stock purchase_price price');
-    console.log('📋 Sample products:', sampleProducts);
-
-    res.status(200).json({
-      success: true,
-      statusCode: 200,
-      message: 'Current inventory value retrieved successfully',
-      data: result
-    });
-
-  } catch (error) {
-    console.error('❌ Current inventory value error:', error);
-    res.status(500).json({
-      success: false,
-      statusCode: 500,
-      message: 'Internal server error',
-      data: null
-    });
-  }
-}
-
-async getDashboardProfitSummary(req, res) {
-  try {
-    const today = new Date();
-    const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(today.setHours(23, 59, 59, 999));
-    
-    // Profit hôm nay
-    const todayProfit = await Order.aggregate([
-      {
-        $match: {
-          created_at: { $gte: startOfDay, $lte: endOfDay },
-          status: { $in: ['completed', 'delivered'] }
-        }
-      },
-      {
-        $lookup: {
-          from: 'orderitems',
-          localField: '_id',
-          foreignField: 'order_id',
-          as: 'items'
-        }
-      },
-      { $unwind: '$items' },
-      {
-        $lookup: {
-          from: 'pets',
-          localField: 'items.pet_id',
-          foreignField: '_id',
-          as: 'pet'
-        }
-      },
-      {
-        $lookup: {
-          from: 'products',
-          localField: 'items.product_id',
-          foreignField: '_id',
-          as: 'product'
-        }
-      },
-      {
-        $addFields: {
-          // 🔧 FIX: Sử dụng purchase_price cho Product
-          itemCostPrice: {
-            $cond: [
-              { $gt: [{ $size: '$pet' }, 0] },
-              { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-              // 🔧 FIX: Dùng purchase_price thay vì price * 0.7
-              { 
-                $multiply: [
-                  '$items.quantity', 
+        },
+        {
+          $group: {
+            _id: {
+              itemId: {
+                $cond: [
+                  { $gt: [{ $size: '$pet' }, 0] }, '$pet_id',
                   {
-                    $ifNull: [
-                      { $arrayElemAt: ['$product.purchase_price', 0] },
-                      { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
+                    $cond: [
+                      { $gt: [{ $size: '$product' }, 0] }, '$product_id',
+                      '$variant_id'
                     ]
                   }
-                ] 
-              }
-            ]
-          },
-          itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalRevenue: { $sum: '$itemRevenue' },
-          totalCostPrice: { $sum: '$itemCostPrice' }
-        }
-      },
-      {
-        $project: {
-          totalRevenue: 1,
-          totalCostPrice: 1,
-          totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
-          profitMargin: {
-            $cond: [
-              { $gt: ['$totalRevenue', 0] },
-              {
-                $multiply: [
-                  { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
-                  100
                 ]
               },
-              0
-            ]
+              itemType: '$itemType'
+            },
+            itemInfo: { $first: '$itemInfo' },
+            totalRevenue: { $sum: '$itemRevenue' },
+            totalCostPrice: { $sum: '$itemCostPrice' },
+            totalQuantitySold: { $sum: '$quantity' },
+            totalOrders: { $addToSet: '$order_id' }
+          }
+        },
+        {
+          $project: {
+            itemInfo: 1,
+            itemType: '$_id.itemType',
+            totalRevenue: 1,
+            totalCostPrice: 1,
+            totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
+            profitMargin: {
+              $cond: [
+                { $gt: ['$totalRevenue', 0] },
+                {
+                  $multiply: [
+                    { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
+                    100
+                  ]
+                },
+                0
+              ]
+            },
+            totalQuantitySold: 1,
+            totalOrders: { $size: '$totalOrders' }
+          }
+        },
+        { $sort: { totalProfit: -1 } },
+        { $limit: parseInt(limit) }
+      ]);
+
+      console.log(`✅ Found ${profitByProducts.length} products with profit data`);
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Profit by products retrieved successfully',
+        data: profitByProducts
+      });
+
+    } catch (error) {
+      console.error('❌ Profit by products error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
+
+  async getCurrentInventoryValue(req, res) {
+    try {
+      console.log('🏪 Getting current inventory value...');
+
+      // Tính tổng giá trị vốn của pets hiện có
+      const petInventory = await Pet.aggregate([
+        { $match: { status: 'available' } },
+        {
+          $group: {
+            _id: null,
+            totalPets: { $sum: 1 },
+            totalValue: { $sum: '$price' } // Pet.price = cost price (giá nhập)
           }
         }
-      }
-    ]);
-    
-    const result = todayProfit[0] || {
-      totalRevenue: 0,
-      totalCostPrice: 0,
-      totalProfit: 0,
-      profitMargin: 0
-    };
-    
-    res.status(200).json({
-      success: true,
-      statusCode: 200,
-      message: 'Dashboard profit summary retrieved successfully',
-      data: result
-    });
-    
-  } catch (error) {
-    console.error('Dashboard profit summary error:', error);
-    res.status(500).json({
-      success: false,
-      statusCode: 500,
-      message: 'Internal server error',
-      data: null
-    });
+      ]);
+
+      // 🔧 FIX: Tính tổng giá trị vốn của variants - lookup Pet để lấy price
+      const variantInventory = await PetVariant.aggregate([
+        { 
+          $match: { 
+            is_available: true, 
+            stock_quantity: { $gt: 0 }
+          } 
+        },
+        {
+          $lookup: {
+            from: 'pets',
+            localField: 'pet_id',
+            foreignField: '_id',
+            as: 'pet'
+          }
+        },
+        { $unwind: '$pet' },
+        {
+          $group: {
+            _id: null,
+            totalVariants: { $sum: '$stock_quantity' },
+            // 🔧 FIX: Dùng pet.price + price_adjustment cho variant
+            totalValue: { 
+              $sum: { 
+                $multiply: [
+                  '$stock_quantity', 
+                  { $add: ['$pet.price', { $ifNull: ['$price_adjustment', 0] }] }
+                ] 
+              } 
+            }
+          }
+        }
+      ]);
+
+      // 🔧 FIX: Tính tổng giá trị vốn của products với purchase_price
+      const productInventory = await Product.aggregate([
+        { 
+          $match: { 
+            status: 'active', 
+            stock: { $gt: 0 }
+          } 
+        },
+        {
+          $group: {
+            _id: null,
+            totalProducts: { $sum: '$stock' },
+            // 🔧 FIX: Sử dụng purchase_price thay vì price * 0.7
+            totalValue: { 
+              $sum: { 
+                $multiply: [
+                  '$stock', 
+                  {
+                    $ifNull: ['$purchase_price', { $multiply: ['$price', 0.7] }] // Fallback nếu không có purchase_price
+                  }
+                ] 
+              } 
+            }
+          }
+        }
+      ]);
+
+      // Debug logging để kiểm tra
+      console.log('🐕 Pet inventory:', petInventory);
+      console.log('🎭 Variant inventory:', variantInventory);  
+      console.log('📦 Product inventory:', productInventory);
+
+      const result = {
+        pets: petInventory[0] || { totalPets: 0, totalValue: 0 },
+        variants: variantInventory[0] || { totalVariants: 0, totalValue: 0 },
+        products: productInventory[0] || { totalProducts: 0, totalValue: 0 }
+      };
+
+      // Tính tổng cộng
+      result.summary = {
+        totalItems: result.pets.totalPets + result.variants.totalVariants + result.products.totalProducts,
+        totalInventoryValue: result.pets.totalValue + result.variants.totalValue + result.products.totalValue
+      };
+
+      console.log('✅ Inventory value calculated:', {
+        pets: result.pets.totalPets,
+        variants: result.variants.totalVariants,
+        products: result.products.totalProducts,
+        totalValue: result.summary.totalInventoryValue
+      });
+
+      // Debug: Log sample products để kiểm tra purchase_price field
+      const sampleProducts = await Product.find({ status: 'active' })
+        .limit(3)
+        .select('name stock purchase_price price');
+      console.log('📋 Sample products:', sampleProducts);
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Current inventory value retrieved successfully',
+        data: result
+      });
+
+    } catch (error) {
+      console.error('❌ Current inventory value error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
   }
-}
+
+  async getDashboardProfitSummary(req, res) {
+    try {
+      const today = new Date();
+      const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+      const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+      
+      // Profit hôm nay
+      const todayProfit = await Order.aggregate([
+        {
+          $match: {
+            created_at: { $gte: startOfDay, $lte: endOfDay },
+            status: { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $lookup: {
+            from: 'orderitems',
+            localField: '_id',
+            foreignField: 'order_id',
+            as: 'items'
+          }
+        },
+        { $unwind: '$items' },
+        {
+          $lookup: {
+            from: 'pets',
+            localField: 'items.pet_id',
+            foreignField: '_id',
+            as: 'pet'
+          }
+        },
+        {
+          $lookup: {
+            from: 'products',
+            localField: 'items.product_id',
+            foreignField: '_id',
+            as: 'product'
+          }
+        },
+        {
+          $addFields: {
+            // 🔧 FIX: Sử dụng purchase_price cho Product
+            itemCostPrice: {
+              $cond: [
+                { $gt: [{ $size: '$pet' }, 0] },
+                { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+                // 🔧 FIX: Dùng purchase_price thay vì price * 0.7
+                { 
+                  $multiply: [
+                    '$items.quantity', 
+                    {
+                      $ifNull: [
+                        { $arrayElemAt: ['$product.purchase_price', 0] },
+                        { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
+                      ]
+                    }
+                  ] 
+                }
+              ]
+            },
+            itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$itemRevenue' },
+            totalCostPrice: { $sum: '$itemCostPrice' }
+          }
+        },
+        {
+          $project: {
+            totalRevenue: 1,
+            totalCostPrice: 1,
+            totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
+            profitMargin: {
+              $cond: [
+                { $gt: ['$totalRevenue', 0] },
+                {
+                  $multiply: [
+                    { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
+                    100
+                  ]
+                },
+                0
+              ]
+            }
+          }
+        }
+      ]);
+      
+      const result = todayProfit[0] || {
+        totalRevenue: 0,
+        totalCostPrice: 0,
+        totalProfit: 0,
+        profitMargin: 0
+      };
+      
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Dashboard profit summary retrieved successfully',
+        data: result
+      });
+      
+    } catch (error) {
+      console.error('Dashboard profit summary error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
+  }
 
 }
 
