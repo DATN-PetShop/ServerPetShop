@@ -23,8 +23,10 @@ class PetController extends BaseCrudController {
   }
 
   async getAllPetsPublic(req, res) {
+    const filter = { status: 'available' };  // ← Chỉ lấy pets có sẵn
+
     try {
-      const pets = await this.model.find()
+      const pets = await this.model.find(filter)
         .populate('breed_id', 'name description')
         .lean();
 
