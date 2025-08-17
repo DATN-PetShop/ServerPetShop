@@ -9,6 +9,7 @@ const ProductImage = require('../models/ProductImage');
 const Image = require('../models/ImagePet');
 // ✅ THÊM IMPORT REVIEW MODEL
 const Review = require('../models/Review');
+const mongoose = require('mongoose');
 
 const searchOrderItems = async (req, res) => {
   try {
@@ -301,6 +302,7 @@ const createOrderItem = async (req, res) => {
     // Kiểm tra các trường bắt buộc
     if (!quantity || !unit_price || !order_id || !addresses_id) {
       return res.status(400).json({ 
+        success: false,
         message: 'Missing required fields: quantity, unit_price, order_id, or addresses_id' 
       });
     }
@@ -310,38 +312,80 @@ const createOrderItem = async (req, res) => {
     
     if (itemIds.length === 0) {
       return res.status(400).json({ 
+        success: false,
         message: 'At least one of pet_id, product_id, or variant_id must be provided' 
       });
     }
     
     if (itemIds.length > 1) {
       return res.status(400).json({ 
+        success: false,
         message: 'Only one of pet_id, product_id, or variant_id can be provided' 
       });
     }
 
-    // 🆕 VERIFY item tồn tại
+    // ✅ KIỂM TRA TỒN KHO VÀ CẬP NHẬT STOCK
+    let itemToUpdate = null;
+    let stockField = '';
+    let currentStock = 0;
+
     if (variant_id) {
+      // Kiểm tra PetVariant tồn tại và stock
       const variant = await PetVariant.findById(variant_id);
       if (!variant) {
-        return res.status(404).json({ message: 'Variant not found' });
+        return res.status(404).json({ 
+          success: false,
+          message: 'Variant not found' 
+        });
       }
-      console.log('✅ Variant verified:', variant._id);
+
+      currentStock = variant.stock_quantity || 0;
+      if (currentStock < quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock. Available: ${currentStock}, Requested: ${quantity}`
+        });
+      }
+
+      itemToUpdate = variant;
+      stockField = 'stock_quantity';
+      console.log('✅ Variant verified. Current stock:', currentStock);
+
     } else if (pet_id) {
+      // Kiểm tra Pet tồn tại (Pet thường không có stock management)
       const pet = await Pet.findById(pet_id);
       if (!pet) {
-        return res.status(404).json({ message: 'Pet not found' });
+        return res.status(404).json({ 
+          success: false,
+          message: 'Pet not found' 
+        });
       }
       console.log('✅ Pet verified:', pet._id);
+
     } else if (product_id) {
+      // Kiểm tra Product tồn tại và stock
       const product = await Product.findById(product_id);
       if (!product) {
-        return res.status(404).json({ message: 'Product not found' });
+        return res.status(404).json({ 
+          success: false,
+          message: 'Product not found' 
+        });
       }
-      console.log('✅ Product verified:', product._id);
+
+      currentStock = product.stock || 0;
+      if (currentStock < quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock. Available: ${currentStock}, Requested: ${quantity}`
+        });
+      }
+
+      itemToUpdate = product;
+      stockField = 'stock';
+      console.log('✅ Product verified. Current stock:', currentStock);
     }
 
-    // 🔧 Tạo OrderItem với variant support
+    // 🔧 Tạo OrderItem data
     const orderItemData = {
       quantity: parseInt(quantity),
       unit_price: parseFloat(unit_price),
@@ -356,20 +400,82 @@ const createOrderItem = async (req, res) => {
 
     console.log('Final orderItemData:', orderItemData);
 
-    const orderItem = new OrderItem(orderItemData);
-    const savedOrderItem = await orderItem.save();
+    // 🆕 SỬ DỤNG TRANSACTION ĐỂ ĐẢM BẢO TÍNH NHẤT QUÁN
+    const session = await mongoose.startSession();
     
-    console.log('✅ OrderItem created successfully:', savedOrderItem._id);
-    
-    res.status(201).json({ 
-      message: 'Order item created', 
-      data: savedOrderItem 
-    });
+    try {
+      await session.withTransaction(async () => {
+        // Tạo OrderItem
+        const orderItem = new OrderItem(orderItemData);
+        const savedOrderItem = await orderItem.save({ session });
+        
+        // Cập nhật stock nếu cần thiết
+        if (itemToUpdate && stockField) {
+          const newStock = currentStock - parseInt(quantity);
+          
+          console.log(`📦 Updating stock: ${currentStock} - ${quantity} = ${newStock}`);
+          
+          if (variant_id) {
+            await PetVariant.findByIdAndUpdate(
+              variant_id,
+              { $inc: { stock_quantity: -parseInt(quantity) } },
+              { session, new: true }
+            );
+          } else if (product_id) {
+            await Product.findByIdAndUpdate(
+              product_id,
+              { $inc: { stock: -parseInt(quantity) } },
+              { session, new: true }
+            );
+          }
+          
+          console.log(`✅ Stock updated successfully. New stock: ${newStock}`);
+        }
+
+        console.log('✅ OrderItem created successfully:', savedOrderItem._id);
+        
+        // Trả về response (sẽ được commit nếu không có lỗi)
+        res.status(201).json({ 
+          success: true,
+          message: 'Order item created and stock updated successfully', 
+          data: savedOrderItem,
+          stockInfo: itemToUpdate && stockField ? {
+            previousStock: currentStock,
+            quantityOrdered: parseInt(quantity),
+            newStock: currentStock - parseInt(quantity)
+          } : null
+        });
+      });
+      
+    } catch (transactionError) {
+      console.error('❌ Transaction error:', transactionError);
+      throw transactionError;
+    } finally {
+      await session.endSession();
+    }
     
   } catch (error) {
     console.error('❌ Create order item error:', error.message);
+    
+    // Kiểm tra loại lỗi cụ thể
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Validation error',
+        details: error.message
+      });
+    }
+    
+    if (error.name === 'MongoError' && error.code === 11000) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Duplicate entry error'
+      });
+    }
+    
     res.status(500).json({ 
-      message: error.message || 'Internal server error' 
+      success: false,
+      message: error.message || 'Internal server error'
     });
   }
 };
