@@ -14,7 +14,7 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
-// Validation cho update appointment status (enhanced version) - UPDATED: Thêm 'no-show'
+// Validation cho update appointment status - ✅ CLEANED: Bỏ admin_notes
 const validateUpdateStatus = [
   param('id')
     .isMongoId()
@@ -22,7 +22,7 @@ const validateUpdateStatus = [
   
   body('status')
     .optional()
-    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show']) // ADDED 'no-show'
+    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show'])
     .withMessage('Trạng thái không hợp lệ'),
   
   body('staff_id')
@@ -39,15 +39,12 @@ const validateUpdateStatus = [
     .isLength({ max: 1000 })
     .withMessage('Ghi chú không được vượt quá 1000 ký tự'),
   
-  body('admin_notes')
-    .optional()
-    .isLength({ max: 1000 })
-    .withMessage('Ghi chú admin không được vượt quá 1000 ký tự'),
+  // ✅ REMOVED: admin_notes validation
   
   handleValidationErrors
 ];
 
-// Validation cho get all appointments (enhanced version) - UPDATED: Thêm 'no-show'
+// Validation cho get all appointments - UNCHANGED
 const validateGetAllAppointments = [
   query('page')
     .optional()
@@ -61,7 +58,7 @@ const validateGetAllAppointments = [
   
   query('status')
     .optional()
-    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show']) // ADDED 'no-show'
+    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show'])
     .withMessage('Trạng thái không hợp lệ'),
   
   query('date')
@@ -112,7 +109,7 @@ const validateGetAllAppointments = [
   handleValidationErrors
 ];
 
-// Validation cho get available staff
+// Validation cho get available staff - UNCHANGED
 const validateGetAvailableStaff = [
   query('appointment_date')
     .notEmpty()
@@ -151,7 +148,7 @@ const validateGetAvailableStaff = [
   handleValidationErrors
 ];
 
-// Validation cho get appointments by date
+// Validation cho get appointments by date - UNCHANGED
 const validateGetByDate = [
   query('date')
     .notEmpty()
@@ -167,7 +164,7 @@ const validateGetByDate = [
   handleValidationErrors
 ];
 
-// Validation cho bulk update (enhanced) - UPDATED: Thêm 'no-show'
+// Validation cho bulk update - ✅ CLEANED: Thay admin_notes thành notes
 const validateBulkUpdate = [
   body('appointment_ids')
     .isArray({ min: 1, max: 50 })
@@ -181,7 +178,7 @@ const validateBulkUpdate = [
     .isObject()
     .withMessage('Dữ liệu cập nhật phải là object')
     .custom((value) => {
-      const allowedKeys = ['status', 'staff_id', 'admin_notes'];
+      const allowedKeys = ['status', 'staff_id', 'notes']; // ✅ CHANGED: admin_notes -> notes
       const providedKeys = Object.keys(value);
       
       if (providedKeys.length === 0) {
@@ -198,7 +195,7 @@ const validateBulkUpdate = [
   
   body('updates.status')
     .optional()
-    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show']) // ADDED 'no-show'
+    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show'])
     .withMessage('Trạng thái không hợp lệ'),
   
   body('updates.staff_id')
@@ -210,15 +207,15 @@ const validateBulkUpdate = [
     })
     .withMessage('ID nhân viên không hợp lệ'),
   
-  body('updates.admin_notes')
+  body('updates.notes') // ✅ CHANGED: admin_notes -> notes
     .optional()
     .isLength({ max: 1000 })
-    .withMessage('Ghi chú admin không được vượt quá 1000 ký tự'),
+    .withMessage('Ghi chú không được vượt quá 1000 ký tự'),
   
   handleValidationErrors
 ];
 
-// Validation cho appointment ID param
+// Validation cho appointment ID param - UNCHANGED
 const validateAppointmentId = [
   param('id')
     .isMongoId()
@@ -227,7 +224,7 @@ const validateAppointmentId = [
   handleValidationErrors
 ];
 
-// Validation cho create appointment (enhanced từ appointmentValidation.js)
+// Validation cho create appointment - UNCHANGED
 const validateCreateAppointment = [
   body('pet_id')
     .notEmpty()
@@ -306,7 +303,7 @@ const validateCreateAppointment = [
   handleValidationErrors
 ];
 
-// Validation cho update appointment (user)
+// Validation cho update appointment (user) - UNCHANGED
 const validateUpdateAppointment = [
   param('id')
     .isMongoId()
@@ -359,7 +356,7 @@ const validateUpdateAppointment = [
   handleValidationErrors
 ];
 
-// Validation cho get available slots
+// Validation cho get available slots - UNCHANGED
 const validateGetAvailableSlots = [
   query('date')
     .notEmpty()
@@ -380,7 +377,7 @@ const validateGetAvailableSlots = [
   handleValidationErrors
 ];
 
-// Validation cho get user appointments - UPDATED: Thêm 'no-show'
+// Validation cho get user appointments - UNCHANGED
 const validateGetUserAppointments = [
   query('page')
     .optional()
@@ -394,7 +391,7 @@ const validateGetUserAppointments = [
   
   query('status')
     .optional()
-    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show']) // ADDED 'no-show'
+    .isIn(['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show'])
     .withMessage('Trạng thái không hợp lệ'),
   
   handleValidationErrors

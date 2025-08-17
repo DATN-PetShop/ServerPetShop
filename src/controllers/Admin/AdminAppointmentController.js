@@ -258,185 +258,185 @@ class AdminAppointmentController {
   }
 
   // Cập nhật trạng thái lịch hẹn và phân công nhân viên - UPDATED: Thêm no-show validation
-  async updateAppointmentStatus(req, res) {
-    try {
-      const { id } = req.params;
-      const { status, staff_id, notes, admin_notes } = req.body;
-      const admin_user_id = req.user?.userId;
+async updateAppointmentStatus(req, res) {
+  try {
+    const { id } = req.params;
+    const { status, staff_id, notes } = req.body; // ✅ REMOVED: admin_notes
+    const admin_user_id = req.user?.userId;
 
-      console.log('Admin updateAppointmentStatus:', { id, status, staff_id, admin_user_id });
+    console.log('Admin updateAppointmentStatus:', { id, status, staff_id, admin_user_id });
 
-      // Validate input
-      if (!status && !staff_id && !notes && !admin_notes) {
-        return res.status(400).json({
-          success: false,
-          message: 'Cần ít nhất một trường để cập nhật'
-        });
-      }
-
-      // Kiểm tra appointment tồn tại
-      const appointment = await Appointment.findById(id);
-      if (!appointment) {
-        return res.status(404).json({
-          success: false,
-          message: 'Không tìm thấy lịch hẹn'
-        });
-      }
-
-      // Validate status - UPDATED: Thêm no-show
-      const validStatuses = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show'];
-      if (status && !validStatuses.includes(status)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Trạng thái không hợp lệ'
-        });
-      }
-
-      // Validate staff_id nếu có
-      if (staff_id) {
-        const staff = await User.findOne({ 
-          _id: staff_id, 
-          role: { $in: ['Staff', 'Admin'] },
-          status: 'active' 
-        });
-        if (!staff) {
-          return res.status(404).json({
-            success: false,
-            message: 'Không tìm thấy nhân viên hoặc nhân viên không hoạt động'
-          });
-        }
-      }
-
-      // Kiểm tra business rules - UPDATED: Bổ sung logic cho no-show
-      if (status) {
-        // Không thể chuyển từ completed/cancelled/no-show sang trạng thái khác
-        if (['completed', 'cancelled', 'no-show'].includes(appointment.status) && 
-            appointment.status !== status) {
-          return res.status(400).json({
-            success: false,
-            message: `Không thể thay đổi trạng thái từ ${appointment.status} sang ${status}`
-          });
-        }
-
-        // No-show chỉ có thể chuyển từ confirmed hoặc in_progress
-        if (status === 'no-show' && !['confirmed', 'in_progress'].includes(appointment.status)) {
-          return res.status(400).json({
-            success: false,
-            message: 'Chỉ có thể đánh dấu No-show từ trạng thái Đã xác nhận hoặc Đang thực hiện'
-          });
-        }
-
-        // Phải có staff_id khi confirmed hoặc in_progress
-        if (['confirmed', 'in_progress'].includes(status) && 
-            !staff_id && !appointment.staff_id) {
-          return res.status(400).json({
-            success: false,
-            message: 'Cần phân công nhân viên trước khi xác nhận lịch hẹn'
-          });
-        }
-      }
-
-      // Kiểm tra xung đột lịch hẹn khi phân công staff - UPDATED: Thêm no-show vào excluded statuses
-      if (staff_id && !['cancelled', 'no-show'].includes(status)) {
-        const conflictAppointment = await Appointment.findOne({
-          _id: { $ne: id },
-          staff_id: staff_id,
-          appointment_date: appointment.appointment_date,
-          appointment_time: appointment.appointment_time,
-          status: { $nin: ['cancelled', 'no-show'] }
-        });
-
-        if (conflictAppointment) {
-          return res.status(409).json({
-            success: false,
-            message: 'Nhân viên đã có lịch hẹn khác trong khung giờ này'
-          });
-        }
-      }
-
-      // Cập nhật appointment
-      const updateData = { updated_at: new Date() };
-      
-      if (status) updateData.status = status;
-      if (staff_id) updateData.staff_id = staff_id;
-      if (notes !== undefined) updateData.notes = notes;
-      if (admin_notes !== undefined) updateData.admin_notes = admin_notes;
-
-      // Lưu log thay đổi
-      if (!appointment.change_log) {
-        appointment.change_log = [];
-      }
-      
-      const changeLogEntry = {
-        timestamp: new Date(),
-        admin_id: admin_user_id,
-        changes: {}
-      };
-
-      if (status && status !== appointment.status) {
-        changeLogEntry.changes.status = {
-          from: appointment.status,
-          to: status
-        };
-      }
-
-      if (staff_id && staff_id !== appointment.staff_id?.toString()) {
-        changeLogEntry.changes.staff_id = {
-          from: appointment.staff_id,
-          to: staff_id
-        };
-      }
-
-      if (Object.keys(changeLogEntry.changes).length > 0) {
-        updateData.change_log = [...appointment.change_log, changeLogEntry];
-      }
-
-      const updatedAppointment = await Appointment.findByIdAndUpdate(
-        id, 
-        updateData, 
-        { new: true }
-      )
-        .populate({
-          path: 'user_id', 
-          select: 'username email full_name phone'
-        })
-        .populate({
-          path: 'pet_id', 
-          select: 'name breed_id age weight gender type',
-          populate: {
-            path: 'breed_id',
-            select: 'name'
-          }
-        })
-        .populate({
-          path: 'service_id', 
-          select: 'name description price duration category'
-        })
-        .populate({
-          path: 'staff_id', 
-          select: 'username email full_name'
-        })
-        .populate({
-          path: 'order_id',
-          select: 'order_number total_amount order_date status'
-        });
-
-      console.log('Admin updateAppointmentStatus - Updated successfully:', updatedAppointment._id);
-
-      res.status(200).json({
-        success: true,
-        message: 'Cập nhật lịch hẹn thành công',
-        data: updatedAppointment
-      });
-    } catch (error) {
-      console.error('Admin updateAppointmentStatus error:', error);
-      res.status(500).json({
+    // Validate input - ✅ UPDATED: Bỏ admin_notes khỏi validation
+    if (!status && !staff_id && !notes) {
+      return res.status(400).json({
         success: false,
-        message: 'Lỗi server',
-        error: error.message
+        message: 'Cần ít nhất một trường để cập nhật'
       });
     }
+
+    // Kiểm tra appointment tồn tại
+    const appointment = await Appointment.findById(id);
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy lịch hẹn'
+      });
+    }
+
+    // Validate status - UPDATED: Thêm no-show
+    const validStatuses = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Trạng thái không hợp lệ'
+      });
+    }
+
+    // Validate staff_id nếu có
+    if (staff_id) {
+      const staff = await User.findOne({ 
+        _id: staff_id, 
+        role: { $in: ['Staff', 'Admin'] },
+        status: 'active' 
+      });
+      if (!staff) {
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy nhân viên hoặc nhân viên không hoạt động'
+        });
+      }
+    }
+
+    // Kiểm tra business rules - UPDATED: Bổ sung logic cho no-show
+    if (status) {
+      // Không thể chuyển từ completed/cancelled/no-show sang trạng thái khác
+      if (['completed', 'cancelled', 'no-show'].includes(appointment.status) && 
+          appointment.status !== status) {
+        return res.status(400).json({
+          success: false,
+          message: `Không thể thay đổi trạng thái từ ${appointment.status} sang ${status}`
+        });
+      }
+
+      // No-show chỉ có thể chuyển từ confirmed hoặc in_progress
+      if (status === 'no-show' && !['confirmed', 'in_progress'].includes(appointment.status)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Chỉ có thể đánh dấu No-show từ trạng thái Đã xác nhận hoặc Đang thực hiện'
+        });
+      }
+
+      // Phải có staff_id khi confirmed hoặc in_progress
+      if (['confirmed', 'in_progress'].includes(status) && 
+          !staff_id && !appointment.staff_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cần phân công nhân viên trước khi xác nhận lịch hẹn'
+        });
+      }
+    }
+
+    // Kiểm tra xung đột lịch hẹn khi phân công staff - UPDATED: Thêm no-show vào excluded statuses
+    if (staff_id && !['cancelled', 'no-show'].includes(status)) {
+      const conflictAppointment = await Appointment.findOne({
+        _id: { $ne: id },
+        staff_id: staff_id,
+        appointment_date: appointment.appointment_date,
+        appointment_time: appointment.appointment_time,
+        status: { $nin: ['cancelled', 'no-show'] }
+      });
+
+      if (conflictAppointment) {
+        return res.status(409).json({
+          success: false,
+          message: 'Nhân viên đã có lịch hẹn khác trong khung giờ này'
+        });
+      }
+    }
+
+    // Cập nhật appointment - ✅ REMOVED: admin_notes processing
+    const updateData = { updated_at: new Date() };
+    
+    if (status) updateData.status = status;
+    if (staff_id) updateData.staff_id = staff_id;
+    if (notes !== undefined) updateData.notes = notes;
+    // ✅ REMOVED: if (admin_notes !== undefined) updateData.admin_notes = admin_notes;
+
+    // Lưu log thay đổi
+    if (!appointment.change_log) {
+      appointment.change_log = [];
+    }
+    
+    const changeLogEntry = {
+      timestamp: new Date(),
+      admin_id: admin_user_id,
+      changes: {}
+    };
+
+    if (status && status !== appointment.status) {
+      changeLogEntry.changes.status = {
+        from: appointment.status,
+        to: status
+      };
+    }
+
+    if (staff_id && staff_id !== appointment.staff_id?.toString()) {
+      changeLogEntry.changes.staff_id = {
+        from: appointment.staff_id,
+        to: staff_id
+      };
+    }
+
+    if (Object.keys(changeLogEntry.changes).length > 0) {
+      updateData.change_log = [...appointment.change_log, changeLogEntry];
+    }
+
+    const updatedAppointment = await Appointment.findByIdAndUpdate(
+      id, 
+      updateData, 
+      { new: true }
+    )
+      .populate({
+        path: 'user_id', 
+        select: 'username email full_name phone'
+      })
+      .populate({
+        path: 'pet_id', 
+        select: 'name breed_id age weight gender type',
+        populate: {
+          path: 'breed_id',
+          select: 'name'
+        }
+      })
+      .populate({
+        path: 'service_id', 
+        select: 'name description price duration category'
+      })
+      .populate({
+        path: 'staff_id', 
+        select: 'username email full_name'
+      })
+      .populate({
+        path: 'order_id',
+        select: 'order_number total_amount order_date status'
+      });
+
+    console.log('Admin updateAppointmentStatus - Updated successfully:', updatedAppointment._id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Cập nhật lịch hẹn thành công',
+      data: updatedAppointment
+    });
+  } catch (error) {
+    console.error('Admin updateAppointmentStatus error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi server',
+      error: error.message
+    });
   }
+}
 
   // Lấy chi tiết lịch hẹn (admin view)
   async getAppointmentById(req, res) {
