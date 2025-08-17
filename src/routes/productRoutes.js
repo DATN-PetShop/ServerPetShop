@@ -11,22 +11,25 @@ const {
   searchProducts,
   getFilterOptions,
   getProductById,
-  getRelatedItems
+  getRelatedItems,
+  getAllProductsAdmin
 } = require('../controllers/productController');
-
-router.get('/:id/related', getRelatedItems);
 
 // ✅ QUAN TRỌNG: Đặt route cụ thể TRƯỚC route động /:id
 router.get('/search', searchProducts);           // ✅ Đặt trước /:id
 router.get('/filter-options', getFilterOptions); // ✅ Đặt trước /:id
 
-// Public routes
-router.get('/', getAllProducts);
-router.get('/:id', getProductById);              // ✅ Đặt cuối cùng
+// ✅ ADMIN ROUTES - Đặt trước public routes để tránh conflict
+router.get('/admin', auth, requireRoles(['Admin', 'Staff']), getAllProductsAdmin);
+router.post('/admin', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createProduct);
+router.put('/admin/:id', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), updateProduct); // ✅ SỬA: thêm /
+router.delete('/admin/:id', auth, requireRoles(['Admin', 'Staff']), deleteProduct); // ✅ SỬA: thêm /
 
-// Admin/Staff routes
-router.post('/', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), createProduct);
-router.put('/:id', auth, requireRoles(['Admin', 'Staff']), upload.array('images', 5), updateProduct);
-router.delete('/:id', auth, requireRoles(['Admin', 'Staff']), deleteProduct);
+// ✅ RELATED ITEMS - Đặt trước /:id
+router.get('/:id/related', getRelatedItems);
+router.get('/', getAllProducts);
+
+// ✅ PUBLIC ROUTES - Đặt cuối cùng
+router.get('/:id', getProductById);              // ✅ Đặt cuối cùng
 
 module.exports = router;

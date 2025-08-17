@@ -64,23 +64,16 @@ router.get('/products-for/:petType', findProductsForPetType);
 
 // Public routes
 router.get('/', getAllPetsPublic);                      
-router.get('/:id', getPetById);                         
 
 // ==========================================
 // =========== ADMIN ROUTES ================
 // ==========================================
 
-// ✅ Sử dụng getAllPetsAdmin method có sẵn
-router.get('/admin', auth, requireRoles(['Admin', 'Staff']), getAllPetsAdmin);
-
-// ==========================================
-// =========== CRUD ROUTES =================
-// ==========================================
-
-// CRUD routes - TEMP: Bỏ authentication để test
+router.get('/admin', getAllPetsAdmin);
 router.post('/', upload.array('images', 5), createPet);
 router.put('/:id', upload.array('images', 5), updatePet);
 router.delete('/:id', deletePet);
+router.get('/:id', getPetById);                         
 
 
 module.exports = router;

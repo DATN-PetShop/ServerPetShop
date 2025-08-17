@@ -23,99 +23,426 @@ class ProductController extends BaseCrudController {
   getImageForeignKey() {
     return 'product_id';
   }
+// ✅ THÊM METHOD MỚI: getAllProductsAdmin - Dành riêng cho Admin/Staff
+async getAllProductsAdmin(req, res) {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      sortBy = 'created_at',
+      sortOrder = 'desc',
+      status, // Admin có thể xem tất cả status
+      categoryId,
+      keyword,
+      showOutOfStock = 'true', // ✅ Admin mặc định xem cả sản phẩm hết hàng
+      stockFilter = 'all', // all, in_stock, out_of_stock, low_stock
+      priceMin,
+      priceMax
+    } = req.query;
 
+    console.log('🔍 GetAllProductsAdmin called with params:', {
+      page, limit, sortBy, sortOrder, status, categoryId, keyword, 
+      showOutOfStock, stockFilter, priceMin, priceMax
+    });
+
+    // ✅ BUILD ADMIN FILTER - Admin có thể xem tất cả
+    const filter = {};
+
+    // Status filter - Admin có thể xem tất cả status
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+
+    // Category filter
+    if (categoryId && categoryId !== 'all') {
+      filter.category_id = categoryId;
+    }
+
+    // ✅ STOCK FILTER - Nhiều options cho admin
+    if (stockFilter !== 'all') {
+      switch (stockFilter) {
+        case 'in_stock':
+          filter.stock = { $gt: 0 };
+          break;
+        case 'out_of_stock':
+          filter.stock = { $eq: 0 };
+          break;
+        case 'low_stock':
+          filter.stock = { $gt: 0, $lte: 5 }; // Từ 1-5 là low stock
+          break;
+      }
+    }
+
+    // ✅ PRICE RANGE FILTER
+    if (priceMin || priceMax) {
+      filter.price = {};
+      if (priceMin) filter.price.$gte = Number(priceMin);
+      if (priceMax) filter.price.$lte = Number(priceMax);
+    }
+
+    // Keyword search - Admin search toàn diện hơn
+    if (keyword && keyword.trim()) {
+      filter.$or = [
+        { name: { $regex: keyword.trim(), $options: 'i' } },
+        { description: { $regex: keyword.trim(), $options: 'i' } },
+        { sku: { $regex: keyword.trim(), $options: 'i' } } // Admin có thể search theo SKU
+      ];
+    }
+
+    console.log('📋 Admin Filter applied:', JSON.stringify(filter, null, 2));
+
+    // Build sort
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // ✅ GET PRODUCTS với thông tin chi tiết cho admin
+    const products = await this.model.find(filter)
+      .populate('category_id', 'name description status')
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    console.log(`📦 Admin found ${products.length} products matching filter`);
+
+    // ✅ POPULATE IMAGES và thêm admin-specific info
+    if (this.imageModel && products.length > 0) {
+      for (let product of products) {
+        const images = await this.imageModel
+          .find({ [this.getImageForeignKey()]: product._id })
+          .lean();
+        product.images = images;
+        
+        // ✅ THÊM THÔNG TIN CHI TIẾT CHO ADMIN
+        product.adminInfo = {
+          stockStatus: {
+            inStock: product.stock > 0,
+            stockCount: product.stock,
+            isLowStock: product.stock > 0 && product.stock <= 5,
+            isCriticalStock: product.stock > 0 && product.stock <= 2,
+            status: product.stock > 0 ? 'available' : 'out_of_stock'
+          },
+          salesInfo: {
+            // Có thể thêm thông tin bán hàng sau này
+            totalRevenue: product.price * (product.sold_count || 0),
+            profitMargin: product.cost_price ? 
+              ((product.price - product.cost_price) / product.price * 100).toFixed(2) + '%' : 'N/A'
+          },
+          timestamps: {
+            created: product.created_at,
+            updated: product.updated_at,
+            lastSold: product.last_sold_at || null
+          }
+        };
+        
+        console.log(`🖼️ Admin - Product ${product.name}: ${images.length} images, stock: ${product.stock}`);
+      }
+    }
+
+    // Count total cho pagination
+    const totalCount = await this.model.countDocuments(filter);
+    const totalPages = Math.ceil(totalCount / Number(limit));
+
+    // ✅ ADMIN STATISTICS - Thống kê chi tiết cho admin
+    const adminStats = await this.model.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalProducts: { $sum: 1 },
+          activeProducts: {
+            $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] }
+          },
+          inactiveProducts: {
+            $sum: { $cond: [{ $eq: ['$status', 'inactive'] }, 1, 0] }
+          },
+          draftProducts: {
+            $sum: { $cond: [{ $eq: ['$status', 'draft'] }, 1, 0] }
+          },
+          inStockProducts: {
+            $sum: { $cond: [{ $gt: ['$stock', 0] }, 1, 0] }
+          },
+          outOfStockProducts: {
+            $sum: { $cond: [{ $eq: ['$stock', 0] }, 1, 0] }
+          },
+          lowStockProducts: {
+            $sum: { $cond: [{ $and: [{ $gt: ['$stock', 0] }, { $lte: ['$stock', 5] }] }, 1, 0] }
+          },
+          criticalStockProducts: {
+            $sum: { $cond: [{ $and: [{ $gt: ['$stock', 0] }, { $lte: ['$stock', 2] }] }, 1, 0] }
+          },
+          totalStockValue: { $sum: '$stock' },
+          totalInventoryValue: { 
+            $sum: { $multiply: ['$stock', '$cost_price'] }
+          },
+          totalPotentialRevenue: { 
+            $sum: { $multiply: ['$stock', '$price'] }
+          },
+          averagePrice: { $avg: '$price' },
+          minPrice: { $min: '$price' },
+          maxPrice: { $max: '$price' }
+        }
+      }
+    ]);
+
+    // ✅ CATEGORY BREAKDOWN
+    const categoryStats = await this.model.aggregate([
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category_id',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      {
+        $group: {
+          _id: '$category_id',
+          categoryName: { $first: { $arrayElemAt: ['$category.name', 0] } },
+          productCount: { $sum: 1 },
+          totalStock: { $sum: '$stock' },
+          averagePrice: { $avg: '$price' },
+          inStockCount: {
+            $sum: { $cond: [{ $gt: ['$stock', 0] }, 1, 0] }
+          }
+        }
+      },
+      { $sort: { productCount: -1 } }
+    ]);
+
+    const stats = adminStats[0] || {
+      totalProducts: 0,
+      activeProducts: 0,
+      inactiveProducts: 0,
+      draftProducts: 0,
+      inStockProducts: 0,
+      outOfStockProducts: 0,
+      lowStockProducts: 0,
+      criticalStockProducts: 0,
+      totalStockValue: 0,
+      totalInventoryValue: 0,
+      totalPotentialRevenue: 0,
+      averagePrice: 0,
+      minPrice: 0,
+      maxPrice: 0
+    };
+
+    console.log('✅ GetAllProductsAdmin response ready:', {
+      productsCount: products.length,
+      totalCount,
+      currentPage: page,
+      totalPages,
+      adminStats: stats
+    });
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: `Admin: Found ${totalCount} products${filter.status ? ` (status: ${filter.status})` : ''}`,
+      data: {
+        products,
+        pagination: {
+          currentPage: Number(page),
+          totalPages,
+          totalCount,
+          hasNextPage: Number(page) < totalPages,
+          hasPrevPage: Number(page) > 1,
+          limit: Number(limit)
+        },
+        // ✅ ADMIN DASHBOARD STATISTICS
+        adminStatistics: {
+          overview: stats,
+          categoryBreakdown: categoryStats,
+          alerts: {
+            outOfStock: stats.outOfStockProducts,
+            lowStock: stats.lowStockProducts,
+            criticalStock: stats.criticalStockProducts,
+            inactiveProducts: stats.inactiveProducts
+          },
+          filterApplied: {
+            status: status || 'all',
+            stockFilter: stockFilter || 'all',
+            categoryFilter: categoryId || 'all',
+            keyword: keyword || null,
+            priceRange: priceMin || priceMax ? { min: priceMin, max: priceMax } : null
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ GetAllProductsAdmin error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
   // ✅ FIX: Enhanced getAll to always include images
-  // async getAllProducts(req, res) {
-  //   try {
-  //     const {
-  //       page = 1,
-  //       limit = 10,
-  //       sortBy = 'created_at',
-  //       sortOrder = 'desc',
-  //       status,
-  //       categoryId,
-  //       keyword
-  //     } = req.query;
+async getAllProducts(req, res) {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      sortBy = 'created_at',
+      sortOrder = 'desc',
+      status,
+      categoryId,
+      keyword,
+      showOutOfStock = false // ✅ THÊM OPTION để admin có thể xem sản phẩm hết hàng
+    } = req.query;
 
-  //     console.log('🔍 GetAllProducts called with params:', {
-  //       page, limit, sortBy, sortOrder, status, categoryId, keyword
-  //     });
+    console.log('🔍 GetAllProducts called with params:', {
+      page, limit, sortBy, sortOrder, status, categoryId, keyword, showOutOfStock
+    });
 
-  //     // Build filter
-  //     const filter = {};
-  //     if (status) filter.status = status;
-  //     if (categoryId) filter.category_id = categoryId;
-  //     if (keyword) {
-  //       filter.$or = [
-  //         { name: { $regex: keyword, $options: 'i' } },
-  //         { description: { $regex: keyword, $options: 'i' } }
-  //       ];
-  //     }
+    // ✅ BUILD FILTER - Mặc định chỉ hiển thị sản phẩm active và còn hàng
+    const filter = {
+      status: 'active' // ✅ Chỉ lấy sản phẩm active
+    };
 
-  //     // Build sort
-  //     const sort = {};
-  //     sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    // ✅ Kiểm tra tồn kho - Mặc định chỉ hiển thị sản phẩm còn hàng
+    if (showOutOfStock !== 'true') {
+      filter.stock = { $gt: 0 }; // Chỉ lấy sản phẩm có stock > 0
+    }
 
-  //     const skip = (Number(page) - 1) * Number(limit);
+    // Override status filter nếu được truyền vào (cho admin)
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
 
-  //     // Get products with category populated
-  //     const products = await this.model.find(filter)
-  //       .populate('category_id', 'name description')
-  //       .sort(sort)
-  //       .skip(skip)
-  //       .limit(Number(limit))
-  //       .lean();
+    // Category filter
+    if (categoryId && categoryId !== 'all') {
+      filter.category_id = categoryId;
+    }
 
-  //     console.log(`📦 Found ${products.length} products`);
+    // Keyword search
+    if (keyword && keyword.trim()) {
+      filter.$or = [
+        { name: { $regex: keyword.trim(), $options: 'i' } },
+        { description: { $regex: keyword.trim(), $options: 'i' } }
+      ];
+    }
 
-  //     // ✅ FIX: Always populate images for each product
-  //     if (this.imageModel && products.length > 0) {
-  //       for (let product of products) {
-  //         const images = await this.imageModel
-  //           .find({ [this.getImageForeignKey()]: product._id })
-  //           .lean();
-  //         product.images = images;
-  //         console.log(`🖼️ Product ${product.name} has ${images.length} images`);
-  //       }
-  //     }
+    console.log('📋 Filter applied:', JSON.stringify(filter, null, 2));
 
-  //     // Count total for pagination
-  //     const totalCount = await this.model.countDocuments(filter);
-  //     const totalPages = Math.ceil(totalCount / Number(limit));
+    // Build sort
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
 
-  //     console.log('✅ GetAllProducts response ready:', {
-  //       productsCount: products.length,
-  //       totalCount,
-  //       currentPage: page,
-  //       totalPages
-  //     });
+    const skip = (Number(page) - 1) * Number(limit);
 
-  //     res.status(200).json({
-  //       success: true,
-  //       statusCode: 200,
-  //       message: 'Products retrieved successfully',
-  //       data: {
-  //         products,
-  //         pagination: {
-  //           currentPage: Number(page),
-  //           totalPages,
-  //           totalCount,
-  //           hasNextPage: Number(page) < totalPages,
-  //           hasPrevPage: Number(page) > 1,
-  //           limit: Number(limit)
-  //         }
-  //       }
-  //     });
-  //   } catch (error) {
-  //     console.error('❌ GetAllProducts error:', error);
-  //     res.status(500).json({
-  //       success: false,
-  //       statusCode: 500,
-  //       message: 'Internal server error',
-  //       data: null
-  //     });
-  //   }
-  // }
+    // Get products with category populated
+    const products = await this.model.find(filter)
+      .populate('category_id', 'name description')
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    console.log(`📦 Found ${products.length} products matching filter`);
+
+    // ✅ FIX: Always populate images for each product
+    if (this.imageModel && products.length > 0) {
+      for (let product of products) {
+        const images = await this.imageModel
+          .find({ [this.getImageForeignKey()]: product._id })
+          .lean();
+        product.images = images;
+        
+        // ✅ THÊM THÔNG TIN STOCK STATUS
+        product.stockStatus = {
+          inStock: product.stock > 0,
+          stockCount: product.stock,
+          isLowStock: product.stock > 0 && product.stock <= 5, // Cảnh báo khi stock <= 5
+          status: product.stock > 0 ? 'available' : 'out_of_stock'
+        };
+        
+        console.log(`🖼️ Product ${product.name}: ${images.length} images, stock: ${product.stock}`);
+      }
+    }
+
+    // Count total for pagination với cùng filter
+    const totalCount = await this.model.countDocuments(filter);
+    const totalPages = Math.ceil(totalCount / Number(limit));
+
+    // ✅ THỐNG KÊ BỔ SUNG
+    const stockStats = await this.model.aggregate([
+      { $match: { status: 'active' } }, // Chỉ tính sản phẩm active
+      {
+        $group: {
+          _id: null,
+          totalProducts: { $sum: 1 },
+          inStockProducts: {
+            $sum: { $cond: [{ $gt: ['$stock', 0] }, 1, 0] }
+          },
+          outOfStockProducts: {
+            $sum: { $cond: [{ $eq: ['$stock', 0] }, 1, 0] }
+          },
+          lowStockProducts: {
+            $sum: { $cond: [{ $and: [{ $gt: ['$stock', 0] }, { $lte: ['$stock', 5] }] }, 1, 0] }
+          },
+          totalStockValue: { $sum: '$stock' }
+        }
+      }
+    ]);
+
+    const stats = stockStats[0] || {
+      totalProducts: 0,
+      inStockProducts: 0,
+      outOfStockProducts: 0,
+      lowStockProducts: 0,
+      totalStockValue: 0
+    };
+
+    console.log('✅ GetAllProducts response ready:', {
+      productsCount: products.length,
+      totalCount,
+      currentPage: page,
+      totalPages,
+      stockStats: stats
+    });
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: `Found ${totalCount} products${showOutOfStock !== 'true' ? ' (in stock only)' : ''}`,
+      data: {
+        products,
+        pagination: {
+          currentPage: Number(page),
+          totalPages,
+          totalCount,
+          hasNextPage: Number(page) < totalPages,
+          hasPrevPage: Number(page) > 1,
+          limit: Number(limit)
+        },
+        // ✅ THÊM THỐNG KÊ KHO HÀNG
+        stockStatistics: {
+          ...stats,
+          filterApplied: {
+            showActiveOnly: filter.status === 'active',
+            showInStockOnly: !!filter.stock,
+            categoryFilter: categoryId || 'all',
+            keyword: keyword || null
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ GetAllProducts error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
 
   // ✅ FIX: Enhanced getProductById to include images
   async getProductById(req, res) {
@@ -916,7 +1243,8 @@ async findPetsForProductType(productCategory, productName, limit = 4) {
 const productController = new ProductController();
 module.exports = {
   createProduct: productController.create.bind(productController),
-  getAllProducts: productController.getAll.bind(productController),
+  getAllProductsAdmin: productController.getAllProductsAdmin.bind(productController),
+  getAllProducts: productController.getAllProducts.bind(productController),
   updateProduct: productController.update.bind(productController),
   deleteProduct: productController.delete.bind(productController),
   searchProducts: productController.searchProducts.bind(productController),
