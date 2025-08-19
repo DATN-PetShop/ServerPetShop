@@ -2,10 +2,6 @@ const mongoose = require('mongoose');
 
 const petSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  price: { type: Number, required: true },
-  age: { type: Number },
-  weight: { type: Number },
-  gender: { type: String, enum: ['Male', 'Female'] },
   description: { type: String },
   status: { type: String, enum: ['available', 'sold', 'reserved'], default: 'available' },
   type: { type: String, required: true },
