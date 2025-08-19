@@ -30,7 +30,21 @@ class OrderController {
         await sendOrderNotification(req.user.userId, savedOrder._id, 'created');
       } catch (notificationError) {
         console.error('Failed to send order notification:', notificationError);
-        // Không làm fail request chính nếu notification lỗi
+      }
+
+      // Gửi thông báo cho Admin/Staff về đơn hàng mới
+      try {
+        const { notifyAdmins } = require('../services/notificationService');
+        await notifyAdmins({
+          title: '🛒 Đơn hàng mới',
+          body: `Khách hàng vừa tạo đơn #${savedOrder._id}`,
+          type: 'order_admin',
+          relatedEntityId: savedOrder._id,
+          relatedEntityType: 'Order',
+          data: { orderId: savedOrder._id }
+        });
+      } catch (adminNotifyErr) {
+        console.error('Failed to notify admins about new order:', adminNotifyErr);
       }
 
       res.status(201).json({ 

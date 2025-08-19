@@ -5,6 +5,7 @@ const Pet = require('../models/Pet');
 const Order = require('../models/Order');
 const OrderItem = require('../models/OrderItem');
 const Image = require('../models/ImagePet'); // ✅ THÊM IMPORT CHO IMAGES
+const { sendAppointmentNotification } = require('../services/notificationService');
 
 class AppointmentController {
   // Tạo lịch hẹn mới
@@ -237,6 +238,28 @@ class AppointmentController {
         message: 'Đặt lịch thành công',
         data: populatedAppointment
       });
+
+      // Thông báo cho chính người dùng về lịch hẹn vừa tạo (trạng thái pending)
+      try {
+        await sendAppointmentNotification(user_id, appointment._id, 'pending');
+      } catch (err) {
+        console.error('Failed to notify user about created appointment:', err);
+      }
+
+      // Thông báo cho Admin/Staff về lịch hẹn mới
+      try {
+        const { notifyAdmins } = require('../services/notificationService');
+        await notifyAdmins({
+          title: '📅 Lịch hẹn mới',
+          body: `Khách hàng vừa đặt lịch dịch vụ ${service.name}`,
+          type: 'appointment_admin',
+          relatedEntityId: appointment._id,
+          relatedEntityType: 'Appointment',
+          data: { appointmentId: appointment._id }
+        });
+      } catch (err) {
+        console.error('Failed to notify admins about appointment:', err);
+      }
     } catch (error) {
       console.error('createAppointment - Error:', error.message, error.stack);
       res.status(500).json({
@@ -583,6 +606,13 @@ class AppointmentController {
         message: 'Hủy lịch hẹn thành công',
         data: cancelledAppointment
       });
+
+      // Gửi thông báo cho người dùng về việc hủy lịch hẹn
+      try {
+        await sendAppointmentNotification(user_id, appointment._id, 'cancelled');
+      } catch (err) {
+        console.error('Failed to notify user about cancelled appointment:', err);
+      }
 
     } catch (error) {
       console.error('❌ Cancel appointment error:', {

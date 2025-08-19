@@ -1,5 +1,6 @@
 const { sendNotificationToUser, sendNotificationToMultipleUsers, sendNotificationToAllUsers } = require('../controllers/pushTokenController');
 const PushToken = require('../models/pushToken');
+const User = require('../models/User');
 
 
 // Notification khi có đơn hàng mới
@@ -212,3 +213,28 @@ module.exports = {
     sendSystemMaintenanceNotification,
     sendAppUpdateNotification
 };
+
+// ================================
+// Admin/Staff broadcast helpers
+// ================================
+
+/**
+ * Notify all Admin/Staff users who have registered push tokens.
+ * Falls back gracefully if no recipients are found.
+ */
+async function notifyAdmins(notificationData) {
+    const adminsAndStaff = await User.find(
+        { role: { $in: ['Admin', 'Staff'] }, status: 'active' },
+        { _id: 1 }
+    ).lean();
+
+    const allAdminUserIds = adminsAndStaff.map(u => u._id.toString());
+
+    if (allAdminUserIds.length === 0) {
+        return { success: false, message: 'No Admin/Staff users found' };
+    }
+
+    return await sendNotificationToMultipleUsers(allAdminUserIds, notificationData);
+}
+
+module.exports.notifyAdmins = notifyAdmins;
