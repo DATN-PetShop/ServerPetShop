@@ -921,18 +921,8 @@ async function requestPasswordReset(req, res) {
     }
 
     const now = new Date();
-    const windowMs = 5 * 60 * 1000; // 5 minutes
-    if (user.password_reset_expires && user.password_reset_expires > now && user.password_reset_attempts >= 5) {
-      return res.status(429).json({
-        success: false,
-        statusCode: 429,
-        message: 'Too many requests. Please try again later.',
-        data: null,
-      });
-    }
-
     // Generate 6-digit numeric OTP
-    const otp = ('' + Math.floor(100000 + Math.random() * 900000));
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
     const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
