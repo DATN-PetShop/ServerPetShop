@@ -36,12 +36,17 @@ const petVariantSchema = new mongoose.Schema({
     max: 30 // years
   },
   
-  // Thông tin bổ sung
-  price_adjustment: {
+  // Đổi từ price_adjustment sang import_price
+  import_price: {
     type: Number,
-    default: 0, // Điều chỉnh giá so với giá gốc (+/-)
-    min: -999999,
-    max: 999999
+    required: true,
+    min: 0
+  }, 
+  //Thêm trường selling_price để lưu giá bán
+  selling_price: {
+    type: Number,
+    required: true,
+    min: 0
   },
   
   stock_quantity: {
@@ -111,11 +116,6 @@ petVariantSchema.statics.findAvailableVariants = function(petId, filters = {}) {
 };
 
 // Instance methods
-petVariantSchema.methods.getFinalPrice = async function() {
-  const pet = await mongoose.model('Pet').findById(this.pet_id);
-  return pet ? pet.price + this.price_adjustment : this.price_adjustment;
-};
-
 petVariantSchema.methods.getDisplayName = function() {
   return `${this.color} - ${this.weight}kg - ${this.gender} - ${this.age} years`;
 };

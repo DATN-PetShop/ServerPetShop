@@ -10,10 +10,10 @@ class PetController extends BaseCrudController {
     super(Pet, Image);
   }
 
-  getRequiredFields() {
-    return ['name', 'price', 'type'];
-  }
-
+// 1. Cập nhật getRequiredFields() method
+getRequiredFields() {
+  return ['name', 'type']; // Chỉ name và type là required
+}
   getEntityName() {
     return 'Pet';
   }
@@ -22,38 +22,77 @@ class PetController extends BaseCrudController {
     return 'pet_id';
   }
 
-  async getAllPetsPublic(req, res) {
-    const filter = { status: 'available' };  // ← Chỉ lấy pets có sẵn
+ async getAllPetsPublic(req, res) {
+    const filter = { status: 'available' };  // Chỉ lấy pets có sẵn
 
     try {
-      const pets = await this.model.find(filter)
-        .populate('breed_id', 'name description')
-        .lean();
+        const pets = await this.model.find(filter)
+            .populate('breed_id', 'name description')
+            .lean();
 
-      // Populate images
-      if (this.imageModel) {
-        for (let pet of pets) {
-          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
-          pet.images = images;
+        // Populate images and variants
+        if (this.imageModel) {
+            for (let pet of pets) {
+                // Populate images
+                const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+                pet.images = images;
+
+                // Populate variants
+                const variants = await PetVariant.find({ 
+                    pet_id: pet._id, 
+                    is_available: true 
+                }).lean();
+
+                // Tính final price cho mỗi variant
+                const variantsWithPrice = await Promise.all(
+                    variants.map(async (variant) => {
+                        const finalPrice = variant.price_adjustment; // Giả sử price_adjustment là giá cuối
+                        return {
+                            ...variant,
+                            final_price: finalPrice,
+                            display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} years`
+                        };
+                    })
+                );
+
+                pet.variants = variantsWithPrice;
+
+                // Thêm variant options cho frontend filter
+                if (variantsWithPrice.length > 0) {
+                    const colors = [...new Set(variantsWithPrice.map(v => v.color))].sort();
+                    const genders = [...new Set(variantsWithPrice.map(v => v.gender))].sort();
+                    const ages = [...new Set(variantsWithPrice.map(v => v.age))].sort((a, b) => a - b);
+                    const weights = [...new Set(variantsWithPrice.map(v => v.weight))].sort((a, b) => a - b);
+
+                    pet.variant_options = {
+                        colors,
+                        genders,
+                        age_range: { min: Math.min(...ages), max: Math.max(...ages) },
+                        weight_range: { min: Math.min(...weights), max: Math.max(...weights) }
+                    };
+                } else {
+                    pet.variants = []; // Đảm bảo có variants array ngay cả khi rỗng
+                    pet.variant_options = {};
+                }
+            }
         }
-      }
 
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'All pets retrieved successfully',
-        data: pets
-      });
+        res.status(200).json({
+            success: true,
+            statusCode: 200,
+            message: 'All pets retrieved successfully',
+            data: pets
+        });
     } catch (error) {
-      console.error('Get all pets public error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
+        console.error('Get all pets public error:', error);
+        res.status(500).json({
+            success: false,
+            statusCode: 500,
+            message: 'Internal server error',
+            data: null
+        });
     }
-  }
+}
 
 // Thay thế method getAllPetsAdmin trong petController.js
 async getAllPetsAdmin(req, res) {
@@ -171,27 +210,26 @@ async getAllPetsAdmin(req, res) {
 async searchPets(req, res) {
   try {
     const {
-      keyword,        // Từ frontend mới
-      q,              // Từ frontend cũ (backward compatibility)
-      type,           // Loại thú cưng (Dog, Cat, etc.)
-      breed_id,       // ID của giống
-      gender,         // Giới tính
-      status = 'available', // Trạng thái
-      minPrice,       // Giá tối thiểu
-      maxPrice,       // Giá tối đa
-      minAge,         // Tuổi tối thiểu
-      maxAge,         // Tuổi tối đa
-      minWeight,      // Cân nặng tối thiểu
-      maxWeight,      // Cân nặng tối đa
-      sortBy = 'created_at', // Sắp xếp theo
-      sortOrder = 'desc',    // Thứ tự sắp xếp
-      page = 1,       // Trang hiện tại
-      limit = 10      // Số lượng pets mỗi trang
+      keyword,
+      q,
+      type,
+      breed_id,
+      gender,
+      status = 'available',
+      minPrice,
+      maxPrice,
+      minAge,
+      maxAge,
+      minWeight,
+      maxWeight,
+      sortBy = 'created_at',
+      sortOrder = 'desc',
+      page = 1,
+      limit = 10
     } = req.query;
 
-    // ✅ Support cả 'keyword' và 'q' parameter
     const searchTerm = keyword || q;
-    
+
     console.log('🔍 Pet Search API called with:', {
       searchTerm,
       type,
@@ -202,83 +240,130 @@ async searchPets(req, res) {
       limit
     });
 
-    // Xây dựng query filter
-    const filter = {};
-
-    // Tìm kiếm theo keyword (tên hoặc mô tả)
+    // Xây dựng filter cho Pet
+    const petFilter = {};
     if (searchTerm) {
-      filter.$or = [
+      petFilter.$or = [
         { name: { $regex: searchTerm, $options: 'i' } },
         { description: { $regex: searchTerm, $options: 'i' } }
       ];
     }
+    if (type) petFilter.type = { $regex: type, $options: 'i' };
+    if (breed_id) petFilter.breed_id = breed_id;
+    if (gender) petFilter.gender = gender;
+    if (status) petFilter.status = status;
 
-    // Lọc theo type
-    if (type) {
-      filter.type = { $regex: type, $options: 'i' };
-    }
-
-    // Lọc theo breed_id
-    if (breed_id) {
-      filter.breed_id = breed_id;
-    }
-
-    // Lọc theo gender
-    if (gender) {
-      filter.gender = gender;
-    }
-
-    // Lọc theo status
-    if (status) {
-      filter.status = status;
-    }
-
-    // Lọc theo khoảng giá
+    // Xây dựng filter cho Variant (giá, tuổi, cân nặng)
+    const variantFilter = { is_available: true };
+    const variantConditions = [];
     if (minPrice || maxPrice) {
-      filter.price = {};
-      if (minPrice) filter.price.$gte = Number(minPrice);
-      if (maxPrice) filter.price.$lte = Number(maxPrice);
+      variantConditions.push({
+        $expr: {
+          $and: [
+            minPrice ? { $gte: ['$final_price', Number(minPrice)] } : true,
+            maxPrice ? { $lte: ['$final_price', Number(maxPrice)] } : true
+          ]
+        }
+      });
     }
-
-    // Lọc theo khoảng tuổi
     if (minAge || maxAge) {
-      filter.age = {};
-      if (minAge) filter.age.$gte = Number(minAge);
-      if (maxAge) filter.age.$lte = Number(maxAge);
+      variantConditions.push({
+        $expr: {
+          $and: [
+            minAge ? { $gte: ['$age', Number(minAge)] } : true,
+            maxAge ? { $lte: ['$age', Number(maxAge)] } : true
+          ]
+        }
+      });
     }
-
-    // Lọc theo khoảng cân nặng
     if (minWeight || maxWeight) {
-      filter.weight = {};
-      if (minWeight) filter.weight.$gte = Number(minWeight);
-      if (maxWeight) filter.weight.$lte = Number(maxWeight);
+      variantConditions.push({
+        $expr: {
+          $and: [
+            minWeight ? { $gte: ['$weight', Number(minWeight)] } : true,
+            maxWeight ? { $lte: ['$weight', Number(maxWeight)] } : true
+          ]
+        }
+      });
     }
 
-    // Xây dựng sort object
-    const sort = {};
-    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    // Aggregation pipeline
+    const pipeline = [
+      { $match: petFilter },
+      {
+        $lookup: {
+          from: 'petvariants',
+          localField: '_id',
+          foreignField: 'pet_id',
+          as: 'variants',
+          pipeline: [
+            { $match: variantFilter },
+            ...variantConditions,
+            {
+              $project: {
+                color: 1,
+                weight: 1,
+                gender: 1,
+                age: 1,
+                price_adjustment: 1,
+                is_available: 1,
+                final_price: { $ifNull: ['$selling_price', 0] }, // Sử dụng selling_price làm final_price
+                display_name: {
+                  $concat: [
+                    '$color', ' - ', { $toString: '$weight' }, 'kg - ', '$gender', ' - ', { $toString: '$age' }, ' years'
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        $lookup: {
+          from: 'imagepets',
+          localField: '_id',
+          foreignField: 'pet_id',
+          as: 'images'
+        }
+      },
+      {
+        $match: {
+          $expr: { $gt: [{ $size: '$variants' }, 0] } // Chỉ giữ pet có variant hợp lệ
+        }
+      },
+      {
+        $lookup: {
+          from: 'breeds',
+          localField: 'breed_id',
+          foreignField: '_id',
+          as: 'breed_id',
+          pipeline: [{ $project: { name: 1, description: 1 } }]
+        }
+      },
+      { $unwind: '$breed_id' },
+      { $sort: { [sortBy]: sortOrder === 'asc' ? 1 : -1 } },
+      { $skip: (Number(page) - 1) * Number(limit) },
+      { $limit: Number(limit) }
+    ];
 
-    const skip = (Number(page) - 1) * Number(limit);
-
-    const pets = await this.model.find(filter)
-      .populate('breed_id', 'name description')
-      .sort(sort)
-      .skip(skip)
-      .limit(Number(limit))
-      .lean();
+    const pets = await this.model.aggregate(pipeline).allowDiskUse(true);
 
     // Đếm tổng số kết quả
-    const totalCount = await this.model.countDocuments(filter);
+    const totalCount = await this.model.aggregate([
+      { $match: petFilter },
+      {
+        $lookup: {
+          from: 'petvariants',
+          localField: '_id',
+          foreignField: 'pet_id',
+          as: 'variants',
+          pipeline: [{ $match: variantFilter }, ...variantConditions]
+        }
+      },
+      { $match: { $expr: { $gt: [{ $size: '$variants' }, 0] } } },
+      { $count: 'total' }
+    ]).then(results => results[0]?.total || 0);
 
-    // Populate images cho mỗi pet
-    if (this.imageModel) {
-      for (let pet of pets) {
-        const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
-        pet.images = images;
-      }
-    }
-
-    // Tính toán thông tin pagination
     const totalPages = Math.ceil(totalCount / Number(limit));
     const hasNextPage = Number(page) < totalPages;
     const hasPrevPage = Number(page) > 1;
@@ -316,7 +401,6 @@ async searchPets(req, res) {
         }
       }
     });
-
   } catch (error) {
     console.error('Search pets error:', error);
     res.status(500).json({
@@ -439,101 +523,272 @@ async searchPets(req, res) {
     }
   }
 
-  async getPetsByBreed(req, res) {
-    try {
-      const { breedId } = req.params;
-      const {
-        sortBy = 'created_at',
-        sortOrder = 'desc',
-        page = 1,
-        limit = 10,
-        status = 'available',
-        minPrice,
-        maxPrice
-      } = req.query;
+// src/controllers/petController.js - Fixed getPetsByBreed method
+async getPetsByBreed(req, res) {
+  try {
+    const { breedId } = req.params;
+    const {
+      sortBy = 'created_at',
+      sortOrder = 'desc',
+      page = 1,
+      limit = 10,
+      status = 'available',
+      minPrice,
+      maxPrice
+    } = req.query;
 
-      const breed = await mongoose.model('Breed').findById(breedId);
-      if (!breed) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Breed not found',
-          data: null
-        });
-      }
-
-      const filter = { breed_id: breedId };
-
-      if (status) {
-        filter.status = status;
-      }
-
-      if (minPrice || maxPrice) {
-        filter.price = {};
-        if (minPrice) filter.price.$gte = Number(minPrice);
-        if (maxPrice) filter.price.$lte = Number(maxPrice);
-      }
-
-      const sort = {};
-      sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
-
-      const skip = (Number(page) - 1) * Number(limit);
-
-      const pets = await this.model.find(filter)
-        .populate('breed_id', 'name description category_id')
-        .populate({
-          path: 'breed_id',
-          populate: {
-            path: 'category_id',
-            select: 'name description'
-          }
-        })
-        .sort(sort)
-        .skip(skip)
-        .limit(Number(limit))
-        .lean();
-
-      const totalCount = await this.model.countDocuments(filter);
-
-      if (this.imageModel) {
-        for (let pet of pets) {
-          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
-          pet.images = images;
-        }
-      }
-
-      const totalPages = Math.ceil(totalCount / Number(limit));
-      const hasNextPage = Number(page) < totalPages;
-      const hasPrevPage = Number(page) > 1;
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: `Pets of breed "${breed.name}" retrieved successfully`,
-        data: {
-          breed: breed,
-          pets,
-          pagination: {
-            currentPage: Number(page),
-            totalPages,
-            totalCount,
-            hasNextPage,
-            hasPrevPage,
-            limit: Number(limit)
-          }
-        }
-      });
-
-    } catch (error) {
-      console.error('Get pets by breed error:', error);
-      res.status(500).json({
+    // Validate breed ID
+    if (!mongoose.Types.ObjectId.isValid(breedId)) {
+      return res.status(400).json({
         success: false,
-        statusCode: 500,
-        message: 'Internal server error',
+        statusCode: 400,
+        message: 'Invalid breed ID format',
         data: null
       });
     }
+
+    // Check if breed exists
+    const breed = await mongoose.model('Breed').findById(breedId);
+    if (!breed) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'Breed not found',
+        data: null
+      });
+    }
+
+    // Build filter object
+    const filter = { breed_id: breedId };
+
+    if (status) {
+      filter.status = status;
+    }
+
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
+
+    // Sort configuration
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Pagination
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // Get pets with population
+    const pets = await this.model.find(filter)
+      .populate('breed_id', 'name description category_id')
+      .populate({
+        path: 'breed_id',
+        populate: {
+          path: 'category_id',
+          select: 'name description'
+        }
+      })
+      .sort(sort)
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    // Get total count for pagination
+    const totalCount = await this.model.countDocuments(filter);
+
+    // Populate images and variants for each pet
+    if (this.imageModel) {
+      for (let pet of pets) {
+        // Populate images
+        const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+        pet.images = images;
+
+        // 🆕 Populate variants with price calculation
+        const variants = await PetVariant.find({ 
+          pet_id: pet._id, 
+          is_available: true 
+        }).lean();
+
+        // Calculate final price for each variant
+        const variantsWithPrice = await Promise.all(
+          variants.map(async (variant) => {
+            const finalPrice = pet.price + (variant.price_adjustment || 0);
+            return {
+              ...variant,
+              final_price: finalPrice,
+              display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} years`
+            };
+          })
+        );
+
+        pet.variants = variantsWithPrice;
+
+        // 🆕 Calculate display price (show lowest variant price or base price)
+        if (variantsWithPrice.length > 0) {
+          const prices = variantsWithPrice.map(v => v.final_price);
+          const minVariantPrice = Math.min(...prices);
+          const maxVariantPrice = Math.max(...prices);
+          
+          // Set display price as the lowest variant price
+          pet.display_price = minVariantPrice;
+          pet.price_range = {
+            min: minVariantPrice,
+            max: maxVariantPrice,
+            hasRange: minVariantPrice !== maxVariantPrice
+          };
+        } else {
+          // No variants, use base price
+          pet.display_price = pet.price;
+          pet.price_range = {
+            min: pet.price,
+            max: pet.price,
+            hasRange: false
+          };
+        }
+
+        // Add variant options for frontend filter
+        if (variantsWithPrice.length > 0) {
+          const colors = [...new Set(variantsWithPrice.map(v => v.color))].sort();
+          const genders = [...new Set(variantsWithPrice.map(v => v.gender))].sort();
+          const ages = [...new Set(variantsWithPrice.map(v => v.age))].sort((a, b) => a - b);
+          const weights = [...new Set(variantsWithPrice.map(v => v.weight))].sort((a, b) => a - b);
+
+          pet.variant_options = {
+            colors,
+            genders,
+            age_range: { min: Math.min(...ages), max: Math.max(...ages) },
+            weight_range: { min: Math.min(...weights), max: Math.max(...weights) }
+          };
+        } else {
+          pet.variants = [];
+          pet.variant_options = {};
+        }
+      }
+    }
+
+    const totalPages = Math.ceil(totalCount / Number(limit));
+    const hasNextPage = Number(page) < totalPages;
+    const hasPrevPage = Number(page) > 1;
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: `Pets of breed "${breed.name}" retrieved successfully`,
+      data: {
+        breed: breed,
+        pets,
+        pagination: {
+          currentPage: Number(page),
+          totalPages,
+          totalCount,
+          hasNextPage,
+          hasPrevPage,
+          limit: Number(limit)
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get pets by breed error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
   }
+}
+
+// 🆕 Also update getAllPetsPublic to include display_price
+async getAllPetsPublic(req, res) {
+  const filter = { status: 'available' };
+
+  try {
+    const pets = await this.model.find(filter)
+      .populate('breed_id', 'name description')
+      .lean();
+
+    // Populate images and variants
+    if (this.imageModel) {
+      for (let pet of pets) {
+        // Populate images
+        const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
+        pet.images = images;
+
+        // Populate variants
+        const variants = await PetVariant.find({ 
+          pet_id: pet._id, 
+          is_available: true 
+        }).lean();
+
+        // Calculate final price for each variant
+        const variantsWithPrice = await Promise.all(
+          variants.map(async (variant) => {
+            const finalPrice = pet.price + (variant.price_adjustment || 0);
+            return {
+              ...variant,
+              final_price: finalPrice,
+              display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} years`
+            };
+          })
+        );
+
+        pet.variants = variantsWithPrice;
+
+        // 🆕 Calculate display price
+        if (variantsWithPrice.length > 0) {
+          const prices = variantsWithPrice.map(v => v.final_price);
+          const minPrice = Math.min(...prices);
+          const maxPrice = Math.max(...prices);
+          
+          pet.display_price = minPrice;
+          pet.price_range = {
+            min: minPrice,
+            max: maxPrice,
+            hasRange: minPrice !== maxPrice
+          };
+
+          // Add variant options for frontend filter
+          const colors = [...new Set(variantsWithPrice.map(v => v.color))].sort();
+          const genders = [...new Set(variantsWithPrice.map(v => v.gender))].sort();
+          const ages = [...new Set(variantsWithPrice.map(v => v.age))].sort((a, b) => a - b);
+          const weights = [...new Set(variantsWithPrice.map(v => v.weight))].sort((a, b) => a - b);
+
+          pet.variant_options = {
+            colors,
+            genders,
+            age_range: { min: Math.min(...ages), max: Math.max(...ages) },
+            weight_range: { min: Math.min(...weights), max: Math.max(...weights) }
+          };
+        } else {
+          pet.display_price = pet.price;
+          pet.price_range = {
+            min: pet.price,
+            max: pet.price,
+            hasRange: false
+          };
+          pet.variants = [];
+          pet.variant_options = {};
+        }
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'All pets retrieved successfully',
+      data: pets
+    });
+  } catch (error) {
+    console.error('Get all pets public error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null
+    });
+  }
+}
 
   async getPetsByCategory(req, res) {
     try {
@@ -1414,118 +1669,47 @@ async searchPets(req, res) {
     try {
       const {
         keyword,
-        breedIds,
-        categoryId,
-        minPrice,
-        maxPrice,
-        minAge,
-        maxAge,
-        minWeight,
-        maxWeight,
-        gender,
-        status = 'available',
+        q,
         type,
-        color,
-        vaccinated,
+        breed_id,
+        status = 'available',
         sortBy = 'created_at',
         sortOrder = 'desc',
         page = 1,
-        limit = 12,
-        includeBreedInfo = true,
-        groupByBreed = false
+        limit = 10
       } = req.query;
 
-      const breedIdArray = breedIds ?
-        (Array.isArray(breedIds) ? breedIds : breedIds.split(',')) : [];
+      const searchTerm = keyword || q;
+      
+      console.log('🔍 Pet Search API called with:', {
+        searchTerm,
+        type,
+        breed_id,
+        status,
+        page,
+        limit
+      });
 
-      let breedFilter = {};
-      let petFilter = {};
+      // Xây dựng query filter (bỏ price, age, weight, gender)
+      const filter = {};
 
-      if (keyword) {
-        breedFilter.$or = [
-          { name: { $regex: keyword, $options: 'i' } },
-          { description: { $regex: keyword, $options: 'i' } }
+      if (searchTerm) {
+        filter.$or = [
+          { name: { $regex: searchTerm, $options: 'i' } },
+          { description: { $regex: searchTerm, $options: 'i' } }
         ];
       }
 
-      if (categoryId) {
-        breedFilter.category_id = new mongoose.Types.ObjectId(categoryId);
-      }
-
-      if (breedIdArray.length > 0) {
-        breedFilter._id = { $in: breedIdArray.map(id => new mongoose.Types.ObjectId(id)) };
-      }
-
-      let validBreeds = [];
-      if (Object.keys(breedFilter).length > 0 || breedIdArray.length > 0) {
-        validBreeds = await mongoose.model('Breed').find(breedFilter)
-          .populate('category_id', 'name description')
-          .lean();
-
-        if (validBreeds.length === 0) {
-          return res.status(200).json({
-            success: true,
-            statusCode: 200,
-            message: 'No breeds found matching the criteria',
-            data: {
-              pets: [],
-              breeds: [],
-              pagination: {
-                currentPage: Number(page),
-                totalPages: 0,
-                totalCount: 0,
-                hasNextPage: false,
-                hasPrevPage: false,
-                limit: Number(limit)
-              }
-            }
-          });
-        }
-
-        const validBreedIds = validBreeds.map(breed => breed._id);
-        petFilter.breed_id = { $in: validBreedIds };
-      }
-
       if (type) {
-        petFilter.type = { $regex: type, $options: 'i' };
+        filter.type = { $regex: type, $options: 'i' };
       }
 
-      if (gender) {
-        petFilter.gender = gender;
+      if (breed_id) {
+        filter.breed_id = breed_id;
       }
 
       if (status) {
-        petFilter.status = status;
-      }
-
-      if (color) {
-        petFilter.color = { $regex: color, $options: 'i' };
-      }
-
-      if (vaccinated !== undefined) {
-        petFilter.vaccinated = vaccinated === 'true';
-      }
-
-      if (minPrice || maxPrice) {
-        petFilter.price = {};
-        if (minPrice) petFilter.price.$gte = Number(minPrice);
-        if (maxPrice) petFilter.price.$lte = Number(maxPrice);
-      }
-
-      if (minAge || maxAge) {
-        petFilter.age = {};
-        if (minAge) petFilter.age.$gte = Number(minAge);
-        if (maxAge) petFilter.age.$lte = Number(maxAge);
-      }
-
-      if (minWeight || maxWeight) {
-        petFilter.weight = {};
-        if (minWeight) petFilter.weight.$gte = Number(minWeight);
-        if (maxWeight) petFilter.weight.$lte = Number(maxWeight);
-      }
-
-      if (groupByBreed === 'true') {
-        return await this.getGroupedBreedResults(req, res, petFilter, validBreeds);
+        filter.status = status;
       }
 
       const sort = {};
@@ -1533,27 +1717,18 @@ async searchPets(req, res) {
 
       const skip = (Number(page) - 1) * Number(limit);
 
-      const pets = await this.model.find(petFilter)
-        .populate({
-          path: 'breed_id',
-          select: 'name description category_id',
-          populate: {
-            path: 'category_id',
-            select: 'name description'
-          }
-        })
+      const pets = await this.model.find(filter)
+        .populate('breed_id', 'name description')
         .sort(sort)
         .skip(skip)
         .limit(Number(limit))
         .lean();
 
-      const totalCount = await this.model.countDocuments(petFilter);
+      const totalCount = await this.model.countDocuments(filter);
 
       if (this.imageModel) {
         for (let pet of pets) {
-          const images = await this.imageModel.find({
-            [this.getImageForeignKey()]: pet._id
-          }).lean();
+          const images = await this.imageModel.find({ [this.getImageForeignKey()]: pet._id }).lean();
           pet.images = images;
         }
       }
@@ -1565,10 +1740,9 @@ async searchPets(req, res) {
       res.status(200).json({
         success: true,
         statusCode: 200,
-        message: 'Breed search completed successfully',
+        message: 'Search completed successfully',
         data: {
           pets,
-          breeds: includeBreedInfo === 'true' ? validBreeds : undefined,
           pagination: {
             currentPage: Number(page),
             totalPages,
@@ -1578,23 +1752,16 @@ async searchPets(req, res) {
             limit: Number(limit)
           },
           filters: {
-            keyword,
-            breedIds: breedIdArray,
-            categoryId,
-            priceRange: { min: minPrice, max: maxPrice },
-            ageRange: { min: minAge, max: maxAge },
-            weightRange: { min: minWeight, max: maxWeight },
-            gender,
-            status,
+            keyword: searchTerm,
             type,
-            color,
-            vaccinated
+            breed_id,
+            status
           }
         }
       });
 
     } catch (error) {
-      console.error('Breed search error:', error);
+      console.error('Search pets error:', error);
       res.status(500).json({
         success: false,
         statusCode: 500,
@@ -2211,7 +2378,7 @@ async searchPets(req, res) {
   // }
 
   // Cập nhật method getPetById để include variants
-  async getPetById(req, res) {
+async getPetById(req, res) {
     try {
       const { id } = req.params;
 
@@ -2318,186 +2485,200 @@ async searchPets(req, res) {
   }
 
   // Cập nhật method create để tự động tạo default variant
-  async create(req, res) {
+
+  // 🆕 Method để tạo variants mặc định khi tạo pet mới
+  async createDefaultVariants(petId, petData) {
     try {
-      const { name, price, type, breed_id, description, age, weight, gender, color } = req.body;
-      
-      // Validate required fields
-      const requiredFields = this.getRequiredFields();
-      for (const field of requiredFields) {
-        if (!req.body[field]) {
-          return res.status(400).json({
-            success: false,
-            statusCode: 400,
-            message: `${field} is required`,
-            data: null
-          });
-        }
-      }
-
-      // Tạo pet object
-      const petData = {
-        ...req.body,
-        // user_id: req.user.userId
-      };
-
-      // Tạo pet
-      const newEntity = new this.model(petData);
-      const savedEntity = await newEntity.save();
-
-      // 🆕 Tự động tạo default variant
-      if (age || weight || gender || color) {
-        await this.createDefaultVariants(savedEntity._id, {
-          age: age || 1,
-          weight: weight || 5,
-          gender: gender || 'Male',
-          color: color || 'Mixed'
-        });
-      }
-
-      // Handle images nếu có
-      if (req.files && req.files.length > 0 && this.imageModel) {
-        const imagePromises = req.files.map(file => {
-          const imageData = {
-            url: file.path,
-            is_primary: false,
-            [this.getImageForeignKey()]: savedEntity._id
-          };
-          return new this.imageModel(imageData).save();
-        });
-
-        const savedImages = await Promise.all(imagePromises);
-        
-        if (savedImages.length > 0) {
-          savedImages[0].is_primary = true;
-          await savedImages[0].save();
-        }
-      }
-
-      // Populate và trả về kết quả
-      const populatedEntity = await this.model.findById(savedEntity._id)
-        .populate('breed_id', 'name description')
-        // .populate('user_id', 'username email');
-
-      res.status(201).json({
-        success: true,
-        statusCode: 201,
-        message: `${this.getEntityName()} created successfully`,
-        data: populatedEntity
+      // Nếu pet có thông tin variants trong request, tạo variants
+      const defaultVariant = new PetVariant({
+        pet_id: petId,
+        color: petData.color || 'Mixed',
+        weight: petData.weight || 5,
+        gender: petData.gender || 'Male',
+        age: petData.age || 1,
+        price_adjustment: 0,
+        stock_quantity: 1
       });
 
+      await defaultVariant.save();
+      console.log(`✅ Created default variant for pet ${petId}`);
     } catch (error) {
-      console.error(`Create ${this.getEntityName()} error:`, error);
-      
-      if (error.code === 11000) {
-        res.status(409).json({
+      console.error('Create default variant error:', error);
+      // Không throw error để không ảnh hưởng đến việc tạo pet
+    }
+  }
+
+  // Cập nhật method create để tự động tạo default variant
+ async create(req, res) {
+  try {
+    const { name, type, breed_id, description } = req.body;
+    
+    // Validate required fields
+    const requiredFields = this.getRequiredFields();
+    for (const field of requiredFields) {
+      if (!req.body[field]) {
+        return res.status(400).json({
           success: false,
-          statusCode: 409,
-          message: `${this.getEntityName()} already exists`,
-          data: null
-        });
-      } else {
-        res.status(500).json({
-          success: false,
-          statusCode: 500,
-          message: 'Internal server error',
+          statusCode: 400,
+          message: `${field} is required`,
           data: null
         });
       }
     }
+
+    // Tạo pet object với model mới đơn giản
+    const petData = {
+      name,
+      type,
+      breed_id,
+      description,
+      status: req.body.status || 'available'
+    };
+
+    // Tạo pet
+    const newEntity = new this.model(petData);
+    const savedEntity = await newEntity.save();
+
+    // Handle images nếu có
+    if (req.files && req.files.length > 0 && this.imageModel) {
+      const imagePromises = req.files.map(file => {
+        const imageData = {
+          url: file.path,
+          is_primary: false,
+          [this.getImageForeignKey()]: savedEntity._id
+        };
+        return new this.imageModel(imageData).save();
+      });
+
+      const savedImages = await Promise.all(imagePromises);
+      
+      if (savedImages.length > 0) {
+        savedImages[0].is_primary = true;
+        await savedImages[0].save();
+      }
+    }
+
+    // Populate và trả về kết quả
+    const populatedEntity = await this.model.findById(savedEntity._id)
+      .populate('breed_id', 'name description');
+
+    res.status(201).json({
+      success: true,
+      statusCode: 201,
+      message: `${this.getEntityName()} created successfully`,
+      data: populatedEntity
+    });
+
+  } catch (error) {
+    console.error(`Create ${this.getEntityName()} error:`, error);
+    
+    if (error.code === 11000) {
+      res.status(409).json({
+        success: false,
+        statusCode: 409,
+        message: `${this.getEntityName()} already exists`,
+        data: null
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
+    }
   }
+}
   
 async getRelatedItems(req, res) {
-    try {
-      const { id: petId } = req.params;
-      const { limit = 8 } = req.query;
+  try {
+    const { id: petId } = req.params;
+    const { limit = 8 } = req.query;
 
-      console.log('🔍 Finding related items for pet:', petId);
+    console.log('🔍 Finding related items for pet:', petId);
 
-      // 1️⃣ Lấy thông tin thú cưng hiện tại
-      const currentPet = await Pet.findById(petId)
-        .populate('breed_id')
-        .lean();
-
-      if (!currentPet) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Không tìm thấy thú cưng',
-          data: null
-        });
-      }
-
-      const relatedItems = [];
-
-      // 2️⃣ Lấy thú cưng cùng breed (ưu tiên cao nhất)
-      const sameBreedPets = await Pet.find({
-        breed_id: currentPet.breed_id?._id,
-        _id: { $ne: petId },
-        status: 'available'
-      })
+    // Lấy thông tin thú cưng hiện tại
+    const currentPet = await Pet.findById(petId)
       .populate('breed_id')
-      .limit(4)
       .lean();
 
-      // Thêm ảnh và đánh dấu loại cho pets cùng breed
-      for (let pet of sameBreedPets) {
-        pet.images = await this.imageModel.find({ pet_id: pet._id })
-          .select('url is_primary')
-          .lean();
-        pet.itemType = 'pet';
-        pet.relationshipType = 'same-breed';
-      }
+    if (!currentPet) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: 'Không tìm thấy thú cưng',
+        data: null
+      });
+    }
 
-      relatedItems.push(...sameBreedPets);
+    const relatedItems = [];
 
-      // 3️⃣ Tìm sản phẩm phù hợp với loài thú cưng
-      // ✅ FIX: Gọi helper method thay vì truyền req object
+    // Lấy thú cưng cùng breed
+    const sameBreedPets = await Pet.find({
+      breed_id: currentPet.breed_id?._id,
+      _id: { $ne: petId },
+      status: 'available'
+    })
+    .populate('breed_id')
+    .limit(4)
+    .lean();
+
+    // Thêm ảnh cho pets cùng breed
+    for (let pet of sameBreedPets) {
+      const images = await this.imageModel.find({ pet_id: pet._id })
+        .select('url is_primary')
+        .lean();
+      pet.images = images;
+      pet.itemType = 'pet';
+      pet.relationshipType = 'same-breed';
+    }
+
+    relatedItems.push(...sameBreedPets);
+
+    // Tìm sản phẩm phù hợp (nếu có Product model)
+    try {
       const relatedProducts = await this._findProductsForPetTypeHelper(
         currentPet.type, 
         Math.min(4, limit - relatedItems.length)
       );
-      
       relatedItems.push(...relatedProducts);
-
-      // 5️⃣ Trả về kết quả
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        data: {
-          relatedItems: relatedItems.slice(0, limit),
-          totalCount: relatedItems.length,
-          currentPet: {
-            id: currentPet._id,
-            name: currentPet.name,
-            type: currentPet.type,
-            breed: currentPet.breed_id?.name
-          },
-          breakdown: {
-            sameBreed: sameBreedPets.length,
-            relatedProducts: relatedProducts.length,
-            sameCategoryPets: Math.max(0, relatedItems.length - sameBreedPets.length - relatedProducts.length)
-          }
-        },
-        message: `Tìm thấy ${relatedItems.length} items liên quan cho ${currentPet.name}`
-      });
-
     } catch (error) {
-      console.error('❌ Error in getRelatedItems for pet:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Lỗi server khi lấy items liên quan',
-        data: null,
-        error: error.message
-      });
+      console.log('Product search not available:', error.message);
     }
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      data: {
+        relatedItems: relatedItems.slice(0, limit),
+        totalCount: relatedItems.length,
+        currentPet: {
+          id: currentPet._id,
+          name: currentPet.name,
+          type: currentPet.type,
+          breed: currentPet.breed_id?.name
+        }
+      },
+      message: `Tìm thấy ${relatedItems.length} items liên quan cho ${currentPet.name}`
+    });
+
+  } catch (error) {
+    console.error('❌ Error in getRelatedItems for pet:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Lỗi server khi lấy items liên quan',
+      data: null,
+      error: error.message
+    });
   }
+}
+
 
   /**
    * 🔧 HELPER: Tìm sản phẩm phù hợp với loài thú cưng (Internal helper)
    */
-  async _findProductsForPetTypeHelper(petType, limit = 4) {
+async _findProductsForPetTypeHelper(petType, limit = 4) {
     try {
       // ✅ FIX: Kiểm tra petType đúng cách
       if (!petType || typeof petType !== 'string') {
