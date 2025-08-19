@@ -295,9 +295,17 @@ class StatisticsController {
 // CẬP NHẬT THỐNG KÊ SẢN PHẨM VÀ THÚ CƯNG
 // ===============================
 
+// ===============================
+// CẬP NHẬT THỐNG KÊ SẢN PHẨM VÀ THÚ CƯNG - FIXED VERSION
+// ===============================
+
+// ===== CẬP NHẬT THỐNG KÊ INVENTORY - TÍCH HỢP PETVARIANT STATISTICS =====
+
 async getInventoryStatistics(req, res) {
   try {
-    // Tồn kho theo danh mục - sử dụng PetVariant để tính giá trung bình
+    console.log('📊 Getting comprehensive inventory statistics...');
+
+    // ===== 1. THỐNG KÊ THEO CATEGORY =====
     const inventoryByCategory = await Pet.aggregate([
       {
         $lookup: {
@@ -319,7 +327,7 @@ async getInventoryStatistics(req, res) {
       { $unwind: '$category' },
       {
         $lookup: {
-          from: 'petvariants',  // Lookup để lấy thông tin giá từ variants
+          from: 'petvariants',
           localField: '_id',
           foreignField: 'pet_id',
           as: 'variants'
@@ -339,297 +347,7 @@ async getInventoryStatistics(req, res) {
           reservedPets: {
             $sum: { $cond: [{ $eq: ['$status', 'reserved'] }, 1, 0] }
           },
-          // Tính giá trung bình từ selling_price của các variants
-          allVariants: { $push: '$variants' }
-        }
-      },
-      {
-        $addFields: {
-          averagePrice: {
-            $avg: {
-              $map: {
-                input: {
-                  $reduce: {
-                    input: '$allVariants',
-                    initialValue: [],
-                    in: { $concatArrays: ['$$value', '$$this'] }
-                  }
-                },
-                in: '$$this.selling_price'
-              }
-            }
-          }
-        }
-      },
-      {
-        $project: {
-          allVariants: 0  // Loại bỏ field tạm thời
-        }
-      }
-    ]);
-
-    // Top 5 thú cưng bán chạy nhất - cập nhật để sử dụng variant_id
-    const topPets = await OrderItem.aggregate([
-      { 
-        $match: { 
-          $or: [
-            { pet_id: { $ne: null } },
-            { variant_id: { $ne: null } }
-          ]
-        }
-      },
-      {
-        $lookup: {
-          from: 'orders',
-          localField: 'order_id',
-          foreignField: '_id',
-          as: 'order'
-        }
-      },
-      { $unwind: '$order' },
-      { $match: { 'order.status': 'completed' } },
-      
-      // Xử lý trường hợp có variant_id
-      {
-        $lookup: {
-          from: 'petvariants',
-          localField: 'variant_id',
-          foreignField: '_id',
-          as: 'variant'
-        }
-      },
-      
-      // Thêm pet_id từ variant nếu cần
-      {
-        $addFields: {
-          actualPetId: {
-            $cond: {
-              if: { $ne: ['$variant_id', null] },
-              then: { $arrayElemAt: ['$variant.pet_id', 0] },
-              else: '$pet_id'
-            }
-          }
-        }
-      },
-      
-      {
-        $group: {
-          _id: '$actualPetId',
-          totalSold: { $sum: '$quantity' },
-          totalRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] } }
-        }
-      },
-      { $sort: { totalSold: -1 } },
-      { $limit: 5 },
-      {
-        $lookup: {
-          from: 'pets',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'pet'
-        }
-      },
-      { $unwind: '$pet' }
-    ]);
-
-    // Thống kê số lượng thú cưng theo loại với giá trung bình từ variants
-    const petsByType = await Pet.aggregate([
-      {
-        $lookup: {
-          from: 'petvariants',
-          localField: '_id',
-          foreignField: 'pet_id',
-          as: 'variants'
-        }
-      },
-      {
-        $group: {
-          _id: '$type',
-          count: { $sum: 1 },
-          // Tính giá trung bình từ selling_price của variants
-          averagePrice: {
-            $avg: {
-              $avg: {
-                $map: {
-                  input: '$variants',
-                  in: '$$this.selling_price'
-                }
-              }
-            }
-          }
-        }
-      },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Sản phẩm/variants sắp hết hàng
-    const lowStockVariants = await PetVariant.aggregate([
-      { 
-        $match: { 
-          stock_quantity: { $lt: 5 },  // Dưới 5 là sắp hết
-          is_available: true
-        } 
-      },
-      {
-        $lookup: {
-          from: 'pets',
-          localField: 'pet_id',
-          foreignField: '_id',
-          as: 'pet'
-        }
-      },
-      { $unwind: '$pet' },
-      {
-        $project: {
-          petName: '$pet.name',
-          color: 1,
-          weight: 1,
-          gender: 1,
-          age: 1,
-          stock_quantity: 1,
-          selling_price: 1,
-          sku: 1,
-          type: { $literal: 'variant' }
-        }
-      },
-      { $sort: { stock_quantity: 1 } },
-      { $limit: 5 }
-    ]);
-
-    // Sản phẩm sắp hết hàng
-    const lowStockProducts = await Product.aggregate([
-      { 
-        $match: { 
-          stock: { $lt: 10 }  // Dưới 10 là sắp hết cho products
-        } 
-      },
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'category_id',
-          foreignField: '_id',
-          as: 'category'
-        }
-      },
-      {
-        $project: {
-          name: 1,
-          stock: 1,
-          price: 1,
-          categoryName: { $arrayElemAt: ['$category.name', 0] },
-          type: { $literal: 'product' }
-        }
-      },
-      { $sort: { stock: 1 } },
-      { $limit: 5 }
-    ]);
-
-    // Kết hợp low stock items
-    const lowStockItems = [...lowStockVariants, ...lowStockProducts]
-      .sort((a, b) => (a.stock_quantity || a.stock) - (b.stock_quantity || b.stock))
-      .slice(0, 10);
-
-    // Thống kê sản phẩm theo category
-    const inventoryByProduct = await Product.aggregate([
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'category_id',
-          foreignField: '_id',
-          as: 'category'
-        }
-      },
-      {
-        $lookup: {
-          from: 'orderitems',
-          localField: '_id',
-          foreignField: 'product_id',
-          as: 'orders'
-        }
-      },
-      {
-        $addFields: {
-          completedOrders: {
-            $filter: {
-              input: '$orders',
-              cond: { $eq: ['$this.order.status', 'completed'] }
-            }
-          }
-        }
-      },
-      {
-        $group: {
-          _id: '$_id',
-          productName: { $first: '$name' },
-          categoryName: { $first: { $arrayElemAt: ['$category.name', 0] } },
-          totalStock: { $first: '$stock' },
-          price: { $first: '$price' },
-          totalSold: { 
-            $sum: {
-              $sum: {
-                $map: {
-                  input: '$completedOrders',
-                  in: '$this.quantity'
-                }
-              }
-            }
-          },
-          totalRevenue: { 
-            $sum: {
-              $sum: {
-                $map: {
-                  input: '$completedOrders',
-                  in: { $multiply: ['$this.quantity', '$this.unit_price'] }
-                }
-              }
-            }
-          }
-        }
-      },
-      { $sort: { totalSold: -1 } },
-      { $limit: 20 }
-    ]);
-
-    // Thêm thống kê theo breed với giá trung bình
-    const inventoryByBreed = await Pet.aggregate([
-      {
-        $lookup: {
-          from: 'breeds',
-          localField: 'breed_id',
-          foreignField: '_id',
-          as: 'breed'
-        }
-      },
-      { $unwind: '$breed' },
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'breed.category_id',
-          foreignField: '_id',
-          as: 'category'
-        }
-      },
-      { $unwind: '$category' },
-      {
-        $lookup: {
-          from: 'petvariants',
-          localField: '_id',
-          foreignField: 'pet_id',
-          as: 'variants'
-        }
-      },
-      {
-        $group: {
-          _id: '$breed._id',
-          breedName: { $first: '$breed.name' },
-          categoryName: { $first: '$category.name' },
-          totalPets: { $sum: 1 },
-          availablePets: {
-            $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
-          },
-          soldPets: {
-            $sum: { $cond: [{ $eq: ['$status', 'sold'] }, 1, 0] }
-          },
+          totalVariants: { $sum: { $size: '$variants' } },
           allVariants: { $push: '$variants' }
         }
       },
@@ -655,12 +373,706 @@ async getInventoryStatistics(req, res) {
         $project: {
           allVariants: 0
         }
+      }
+    ]);
+
+    // ===== 2. PETVARIANT COMPREHENSIVE STATISTICS =====
+    const petVariantStats = await PetVariant.aggregate([
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
       },
-      { $sort: { totalPets: -1 } },
+      { $unwind: '$pet' },
+      {
+        $lookup: {
+          from: 'breeds',
+          localField: 'pet.breed_id',
+          foreignField: '_id',
+          as: 'breed'
+        }
+      },
+      {
+        $lookup: {
+          from: 'orderitems',
+          let: { variantId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$variant_id', '$$variantId'] }
+              }
+            },
+            {
+              $lookup: {
+                from: 'orders',
+                localField: 'order_id',
+                foreignField: '_id',
+                as: 'order'
+              }
+            },
+            { $unwind: '$order' },
+            { $match: { 'order.status': 'completed' } }
+          ],
+          as: 'soldItems'
+        }
+      },
+      {
+        $addFields: {
+          actualSoldQuantity: { $sum: '$soldItems.quantity' },
+          soldRevenue: {
+            $sum: {
+              $map: {
+                input: '$soldItems',
+                in: { $multiply: ['$$this.quantity', '$$this.unit_price'] }
+              }
+            }
+          },
+          finalPrice: { $add: ['$pet.price', '$price_adjustment'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalVariants: { $sum: 1 },
+          availableVariants: {
+            $sum: { $cond: [{ $eq: ['$is_available', true] }, 1, 0] }
+          },
+          totalVariantStock: { $sum: '$stock_quantity' },
+          availableVariantStock: {
+            $sum: { 
+              $cond: [
+                { $and: [{ $eq: ['$is_available', true] }, { $gt: ['$stock_quantity', 0] }] },
+                '$stock_quantity',
+                0
+              ]
+            }
+          },
+          totalVariantsSold: { $sum: '$actualSoldQuantity' },
+          uniqueVariantsSold: {
+            $sum: { $cond: [{ $gt: ['$actualSoldQuantity', 0] }, 1, 0] }
+          },
+          totalVariantRevenue: { $sum: '$soldRevenue' },
+          totalInventoryValue: {
+            $sum: { $multiply: ['$stock_quantity', '$finalPrice'] }
+          },
+          availableInventoryValue: {
+            $sum: { 
+              $cond: [
+                { $and: [{ $eq: ['$is_available', true] }, { $gt: ['$stock_quantity', 0] }] },
+                { $multiply: ['$stock_quantity', '$finalPrice'] },
+                0
+              ]
+            }
+          },
+          totalBasePets: { $sum: 1 },
+          availableBasePets: {
+            $sum: { $cond: [{ $eq: ['$pet.status', 'available'] }, 1, 0] }
+          },
+          uniqueBreeds: { $addToSet: '$breed._id' }
+        }
+      },
+      {
+        $project: {
+          totalVariants: 1,
+          availableVariants: 1,
+          totalVariantStock: 1,
+          availableVariantStock: 1,
+          totalVariantsSold: 1,
+          uniqueVariantsSold: 1,
+          totalVariantRevenue: 1,
+          totalInventoryValue: 1,
+          availableInventoryValue: 1,
+          totalBasePets: 1,
+          availableBasePets: 1,
+          uniqueBreeds: { $size: '$uniqueBreeds' },
+          variantTurnoverRate: {
+            $cond: [
+              { $gt: [{ $add: ['$totalVariantStock', '$totalVariantsSold'] }, 0] },
+              {
+                $multiply: [
+                  { 
+                    $divide: [
+                      '$totalVariantsSold', 
+                      { $add: ['$totalVariantStock', '$totalVariantsSold'] }
+                    ] 
+                  },
+                  100
+                ]
+              },
+              0
+            ]
+          },
+          avgVariantPrice: {
+            $cond: [
+              { $gt: ['$totalVariantsSold', 0] },
+              { $divide: ['$totalVariantRevenue', '$totalVariantsSold'] },
+              0
+            ]
+          }
+        }
+      }
+    ]);
+
+    // ===== 3. TOP PETS =====
+    const topPets = await Pet.aggregate([
+      {
+        $lookup: {
+          from: 'orderitems',
+          let: { petId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ['$pet_id', '$$petId'] },
+                    { $ne: ['$variant_id', null] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: 'petvariants',
+                localField: 'variant_id',
+                foreignField: '_id',
+                as: 'variant'
+              }
+            },
+            {
+              $addFields: {
+                isPetSale: {
+                  $or: [
+                    { $eq: ['$pet_id', '$$petId'] },
+                    { $eq: [{ $arrayElemAt: ['$variant.pet_id', 0] }, '$$petId'] }
+                  ]
+                }
+              }
+            },
+            { $match: { isPetSale: true } },
+            {
+              $lookup: {
+                from: 'orders',
+                localField: 'order_id',
+                foreignField: '_id',
+                as: 'order'
+              }
+            },
+            { $unwind: '$order' },
+            { $match: { 'order.status': 'completed' } }
+          ],
+          as: 'soldItems'
+        }
+      },
+      {
+        $addFields: {
+          totalSold: { $sum: '$soldItems.quantity' },
+          totalRevenue: {
+            $sum: {
+              $map: {
+                input: '$soldItems',
+                in: { $multiply: ['$$this.quantity', '$$this.unit_price'] }
+              }
+            }
+          }
+        }
+      },
+      {
+        $match: {
+          totalSold: { $gt: 0 }
+        }
+      },
+      {
+        $lookup: {
+          from: 'breeds',
+          localField: 'breed_id',
+          foreignField: '_id',
+          as: 'breed'
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          price: 1,
+          type: 1,
+          status: 1,
+          breed: { $arrayElemAt: ['$breed', 0] },
+          totalSold: 1,
+          totalRevenue: 1,
+          avgSalePrice: {
+            $cond: [
+              { $gt: ['$totalSold', 0] },
+              { $divide: ['$totalRevenue', '$totalSold'] },
+              0
+            ]
+          }
+        }
+      },
+      { $sort: { totalSold: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // ===== 4. TOP SELLING VARIANTS =====
+    const topSellingVariants = await OrderItem.aggregate([
+      {
+        $lookup: {
+          from: 'orders',
+          localField: 'order_id',
+          foreignField: '_id',
+          as: 'order'
+        }
+      },
+      { $unwind: '$order' },
+      {
+        $match: {
+          'order.status': 'completed',
+          variant_id: { $ne: null }
+        }
+      },
+      {
+        $group: {
+          _id: '$variant_id',
+          totalSold: { $sum: '$quantity' },
+          totalRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] } },
+          orderCount: { $sum: 1 }
+        }
+      },
+      { $sort: { totalSold: -1 } },
+      { $limit: 10 },
+      {
+        $lookup: {
+          from: 'petvariants',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'variant'
+        }
+      },
+      { $unwind: '$variant' },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'variant.pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
+      },
+      { $unwind: '$pet' },
+      {
+        $project: {
+          variant: 1,
+          petInfo: '$pet',
+          totalSold: 1,
+          totalRevenue: 1,
+          orderCount: 1,
+          displayName: {
+            $concat: [
+              '$pet.name', 
+              ' (', '$variant.color', 
+              ' - ', { $toString: '$variant.weight' }, 'kg',
+              ' - ', '$variant.gender',
+              ' - ', { $toString: '$variant.age' }, ' tuổi)'
+            ]
+          }
+        }
+      }
+    ]);
+
+    // ===== 5. PETS BY TYPE =====
+    const petsByType = await Pet.aggregate([
+      {
+        $lookup: {
+          from: 'petvariants',
+          localField: '_id',
+          foreignField: 'pet_id',
+          as: 'variants'
+        }
+      },
+      {
+        $group: {
+          _id: '$type',
+          count: { $sum: 1 },
+          variantCount: { $sum: { $size: '$variants' } },
+          averagePrice: { $avg: '$price' }
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+
+    // ===== 6. LOW STOCK ITEMS =====
+    const lowStockVariants = await PetVariant.aggregate([
+      { 
+        $match: { 
+          stock_quantity: { $lt: 5 },
+          is_available: true
+        } 
+      },
+      {
+        $lookup: {
+          from: 'pets',
+          localField: 'pet_id',
+          foreignField: '_id',
+          as: 'pet'
+        }
+      },
+      { $unwind: '$pet' },
+      {
+        $project: {
+          petName: '$pet.name',
+          color: 1,
+          weight: 1,
+          gender: 1,
+          age: 1,
+          stock_quantity: 1,
+          selling_price: { $add: ['$pet.price', '$price_adjustment'] },
+          sku: 1,
+          type: { $literal: 'variant' },
+          displayName: {
+            $concat: [
+              '$pet.name', 
+              ' (', '$color', 
+              ' - ', { $toString: '$weight' }, 'kg',
+              ' - ', '$gender',
+              ' - ', { $toString: '$age' }, ' tuổi)'
+            ]
+          }
+        }
+      },
+      { $sort: { stock_quantity: 1 } },
+      { $limit: 5 }
+    ]);
+
+    const lowStockProducts = await Product.aggregate([
+      { 
+        $match: { 
+          stock: { $lt: 10 }
+        } 
+      },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category_id',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          stock: 1,
+          price: 1,
+          categoryName: { $arrayElemAt: ['$category.name', 0] },
+          type: { $literal: 'product' },
+          displayName: '$name'
+        }
+      },
+      { $sort: { stock: 1 } },
+      { $limit: 5 }
+    ]);
+
+    const lowStockItems = [...lowStockVariants, ...lowStockProducts]
+      .sort((a, b) => (a.stock_quantity || a.stock) - (b.stock_quantity || b.stock))
+      .slice(0, 10);
+
+    // ===== 7. INVENTORY BY PRODUCT =====
+    const inventoryByProduct = await Product.aggregate([
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category_id',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      {
+        $lookup: {
+          from: 'orderitems',
+          let: { productId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$product_id', '$$productId'] }
+              }
+            },
+            {
+              $lookup: {
+                from: 'orders',
+                localField: 'order_id',
+                foreignField: '_id',
+                as: 'order'
+              }
+            },
+            { $unwind: '$order' },
+            { $match: { 'order.status': 'completed' } }
+          ],
+          as: 'completedOrders'
+        }
+      },
+      {
+        $addFields: {
+          totalSold: {
+            $sum: {
+              $map: {
+                input: '$completedOrders',
+                in: '$$this.quantity'
+              }
+            }
+          },
+          totalRevenue: {
+            $sum: {
+              $map: {
+                input: '$completedOrders',
+                in: { $multiply: ['$$this.quantity', '$$this.unit_price'] }
+              }
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: '$_id',
+          productName: { $first: '$name' },
+          categoryName: { $first: { $arrayElemAt: ['$category.name', 0] } },
+          totalStock: { $first: '$stock' },
+          price: { $first: '$price' },
+          totalSold: { $first: '$totalSold' },
+          totalRevenue: { $first: '$totalRevenue' }
+        }
+      },
+      { $sort: { totalSold: -1 } },
       { $limit: 20 }
     ]);
 
-    // Cảnh báo breed sắp hết
+    // ===== 8. INVENTORY BY BREED với totalVariantStock =====
+    const inventoryByBreed = await Pet.aggregate([
+      {
+        $lookup: {
+          from: 'breeds',
+          localField: 'breed_id',
+          foreignField: '_id',
+          as: 'breed'
+        }
+      },
+      { $unwind: '$breed' },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'breed.category_id',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      { $unwind: '$category' },
+      {
+        $lookup: {
+          from: 'orderitems',
+          let: { petId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ['$pet_id', '$$petId'] },
+                    { $ne: ['$variant_id', null] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: 'petvariants',
+                localField: 'variant_id', 
+                foreignField: '_id',
+                as: 'variant'
+              }
+            },
+            {
+              $addFields: {
+                isPetItem: {
+                  $or: [
+                    { $eq: ['$pet_id', '$$petId'] },
+                    { $eq: [{ $arrayElemAt: ['$variant.pet_id', 0] }, '$$petId'] }
+                  ]
+                }
+              }
+            },
+            { $match: { isPetItem: true } },
+            {
+              $lookup: {
+                from: 'orders',
+                localField: 'order_id',
+                foreignField: '_id',
+                as: 'order'
+              }
+            },
+            { $unwind: '$order' },
+            { $match: { 'order.status': 'completed' } }
+          ],
+          as: 'soldItems'
+        }
+      },
+      {
+        $lookup: {
+          from: 'petvariants',
+          localField: '_id',
+          foreignField: 'pet_id',
+          as: 'variants'
+        }
+      },
+      {
+        $group: {
+          _id: '$breed._id',
+          breedName: { $first: '$breed.name' },
+          categoryName: { $first: '$category.name' },
+          totalPets: { $sum: 1 },
+          availablePets: {
+            $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
+          },
+          totalVariants: { $sum: { $size: '$variants' } },
+          totalVariantStock: {
+            $sum: {
+              $sum: {
+                $map: {
+                  input: '$variants',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$this.is_available', true] },
+                      { $ifNull: ['$$this.stock_quantity', 0] },
+                      0
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          availableVariantStock: {
+            $sum: {
+              $sum: {
+                $map: {
+                  input: '$variants',
+                  in: {
+                    $cond: [
+                      { 
+                        $and: [
+                          { $eq: ['$$this.is_available', true] },
+                          { $gt: [{ $ifNull: ['$$this.stock_quantity', 0] }, 0] }
+                        ]
+                      },
+                      { $ifNull: ['$$this.stock_quantity', 0] },
+                      0
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          soldPets: {
+            $sum: {
+              $cond: [
+                { $gt: [{ $size: '$soldItems' }, 0] },
+                1, 
+                { $cond: [{ $eq: ['$status', 'sold'] }, 1, 0] }
+              ]
+            }
+          },
+          soldQuantity: { $sum: { $sum: '$soldItems.quantity' } },
+          allVariants: { $push: '$variants' }
+        }
+      },
+      {
+        $addFields: {
+          averageVariantPrice: {
+            $avg: {
+              $map: {
+                input: {
+                  $reduce: {
+                    input: '$allVariants',
+                    initialValue: [],
+                    in: { $concatArrays: ['$$value', '$$this'] }
+                  }
+                },
+                in: '$$this.selling_price'
+              }
+            }
+          },
+          stockUtilizationRate: {
+            $cond: [
+              { $gt: ['$totalVariantStock', 0] },
+              {
+                $multiply: [
+                  { 
+                    $divide: [
+                      { $subtract: ['$totalVariantStock', '$availableVariantStock'] }, 
+                      '$totalVariantStock'
+                    ] 
+                  },
+                  100
+                ]
+              },
+              0
+            ]
+          }
+        }
+      },
+      {
+        $project: {
+          breedName: 1,
+          categoryName: 1,
+          totalPets: 1,
+          availablePets: 1,
+          totalVariants: 1,
+          totalVariantStock: 1,
+          availableVariantStock: 1,
+          soldVariantStock: { $subtract: ['$totalVariantStock', '$availableVariantStock'] },
+          soldPets: 1,
+          soldQuantity: 1,
+          averageVariantPrice: 1,
+          stockUtilizationRate: 1,
+          performance: {
+            stockTurnover: '$stockUtilizationRate',
+            averagePrice: '$averageVariantPrice',
+            totalValue: { $multiply: ['$totalVariantStock', '$averageVariantPrice'] }
+          }
+        }
+      },
+      { $sort: { totalVariantStock: -1 } },
+      { $limit: 20 }
+    ]);
+
+    // ===== 9. VARIANTS BY COLOR & GENDER =====
+    const variantsByColor = await PetVariant.aggregate([
+      {
+        $group: {
+          _id: '$color',
+          count: { $sum: 1 },
+          availableCount: {
+            $sum: { $cond: [{ $eq: ['$is_available', true] }, 1, 0] }
+          },
+          totalStock: { $sum: '$stock_quantity' }
+        }
+      },
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ]);
+
+    const variantsByGender = await PetVariant.aggregate([
+      {
+        $group: {
+          _id: '$gender',
+          count: { $sum: 1 },
+          availableCount: {
+            $sum: { $cond: [{ $eq: ['$is_available', true] }, 1, 0] }
+          },
+          avgAge: { $avg: '$age' },
+          avgWeight: { $avg: '$weight' }
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+
+    // ===== 10. BREED ALERTS =====
     const breedAlerts = await Pet.aggregate([
       {
         $lookup: {
@@ -706,102 +1118,79 @@ async getInventoryStatistics(req, res) {
       { $sort: { availableCount: 1 } }
     ]);
 
-    // Tổng quan
-    const summary = await Pet.aggregate([
-      {
-        $lookup: {
-          from: 'breeds',
-          localField: 'breed_id',
-          foreignField: '_id',
-          as: 'breed'
-        }
-      },
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'breed.category_id',
-          foreignField: '_id',
-          as: 'category'
-        }
-      },
-      {
-        $lookup: {
-          from: 'petvariants',
-          localField: '_id',
-          foreignField: 'pet_id',
-          as: 'variants'
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalCategories: { $addToSet: { $arrayElemAt: ['$category._id', 0] } },
-          totalBreeds: { $addToSet: '$breed_id' },
-          totalPets: { $sum: 1 },
-          totalAvailable: {
-            $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
-          },
-          totalSold: {
-            $sum: { $cond: [{ $eq: ['$status', 'sold'] }, 1, 0] }
-          },
-          allVariants: { $push: '$variants' }
-        }
-      },
-      {
-        $addFields: {
-          totalCategories: { $size: '$totalCategories' },
-          totalBreeds: { $size: '$totalBreeds' },
-          totalValue: {
-            $sum: {
-              $map: {
-                input: {
-                  $reduce: {
-                    input: '$allVariants',
-                    initialValue: [],
-                    in: { $concatArrays: ['$value', '$this'] }
-                  }
-                },
-                in: { $multiply: ['$this.selling_price', '$this.stock_quantity'] }
-              }
-            }
-          }
-        }
-      }
-    ]);
+    // ===== 11. ENHANCED SUMMARY =====
+    const variantData = petVariantStats[0] || {};
+    const enhancedSummary = {
+      totalCategories: inventoryByCategory.length,
+      totalBreeds: inventoryByBreed.length,
+      totalPets: variantData.totalBasePets || 0,
+      totalAvailable: variantData.availableBasePets || 0,
+      totalVariants: variantData.totalVariants || 0,
+      availableVariants: variantData.availableVariants || 0,
+      totalVariantStock: variantData.totalVariantStock || 0,
+      availableVariantStock: variantData.availableVariantStock || 0,
+      totalVariantsSold: variantData.totalVariantsSold || 0,
+      uniqueVariantsSold: variantData.uniqueVariantsSold || 0,
+      totalInventoryValue: variantData.totalInventoryValue || 0,
+      availableInventoryValue: variantData.availableInventoryValue || 0,
+      totalVariantRevenue: variantData.totalVariantRevenue || 0,
+      variantTurnoverRate: variantData.variantTurnoverRate || 0,
+      avgVariantPrice: variantData.avgVariantPrice || 0,
+      alertCount: breedAlerts.length,
+      lowStockCount: lowStockItems.length
+    };
+
+    console.log('✅ Enhanced inventory statistics completed:', {
+      totalVariants: enhancedSummary.totalVariants,
+      variantsSold: enhancedSummary.totalVariantsSold,
+      turnoverRate: enhancedSummary.variantTurnoverRate.toFixed(2) + '%',
+      topVariants: topSellingVariants.length
+    });
 
     res.status(200).json({
       success: true,
       statusCode: 200,
-      message: 'Inventory statistics retrieved successfully',
+      message: 'Enhanced inventory statistics with breed variant stock retrieved successfully',
       data: {
         inventoryByCategory,
+        inventoryByBreed,
+        inventoryByProduct,
         topPets,
         petsByType,
-        lowStockProducts: lowStockItems, // Bao gồm cả variants và products
-        // Thêm các thống kê mới
-        inventoryByBreed,
-        inventoryByProduct, // Thống kê sản phẩm
+        topSellingVariants,
+        petVariantStats: variantData,
+        variantsByColor,
+        variantsByGender,
+        lowStockProducts: lowStockItems,
         breedAlerts,
-        summary: summary[0] ? {
-          ...summary[0],
-          alertCount: breedAlerts.length
-        } : {
-          totalCategories: 0,
-          totalBreeds: 0,
-          totalPets: 0,
-          totalAvailable: 0,
-          totalSold: 0,
-          totalValue: 0,
-          alertCount: 0
+        summary: enhancedSummary,
+        breedVariantSummary: {
+          totalBreeds: inventoryByBreed.length,
+          totalVariantStock: inventoryByBreed.reduce((sum, breed) => sum + breed.totalVariantStock, 0),
+          totalAvailableStock: inventoryByBreed.reduce((sum, breed) => sum + breed.availableVariantStock, 0),
+          topBreedsByStock: inventoryByBreed.slice(0, 5).map(breed => ({
+            breedName: breed.breedName,
+            totalVariantStock: breed.totalVariantStock,
+            availableVariantStock: breed.availableVariantStock,
+            utilizationRate: breed.stockUtilizationRate
+          }))
+        },
+        debug: {
+          topPetsCount: topPets.length,
+          topVariantsCount: topSellingVariants.length,
+          breedStatsCount: inventoryByBreed.length,
+          lowStockCount: lowStockItems.length,
+          calculationMethod: 'Enhanced with breed variant stock aggregation'
         }
       }
     });
   } catch (error) {
-    console.error('Inventory statistics error:', error);
+    console.error('❌ Enhanced inventory statistics error:', error);
     res.status(500).json({
       success: false,
       statusCode: 500,
       message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       data: null
     });
   }
@@ -1307,126 +1696,261 @@ async getCurrentInventoryValue(req, res) {
   // 2. THỐNG KÊ KHÁCH HÀNG
   // ===============================
   
-  async getCustomerStatistics(req, res) {
-    try {
-      const { startDate, endDate } = req.query;
-      
-      let dateFilter = {};
-      if (startDate && endDate) {
-        dateFilter = {
-          created_at: {
-            $gte: new Date(startDate),
-            $lte: new Date(endDate)
-          }
-        };
-      }
-      
-      // Tổng số khách hàng
-      const totalCustomers = await User.countDocuments({ role: 'Customer' });
-      
-      // Khách hàng mới theo thời gian
-      const newCustomers = await User.aggregate([
-        { $match: { role: 'Customer', ...dateFilter } },
-        {
-          $group: {
-            _id: {
-              year: { $year: '$created_at' },
-              month: { $month: '$created_at' }
-            },
-            count: { $sum: 1 }
-          }
-        },
-        { $sort: { '_id.year': 1, '_id.month': 1 } }
-      ]);
-      
-      // Khách hàng có giá trị cao nhất
-      const highValueCustomers = await Order.aggregate([
-        { $match: { status: 'completed' } },
-        {
-          $group: {
-            _id: '$user_id',
-            totalSpent: { $sum: '$total_amount' },
-            orderCount: { $sum: 1 },
-            averageOrderValue: { $avg: '$total_amount' }
-          }
-        },
-        { $sort: { totalSpent: -1 } },
-        { $limit: 10 },
-        {
-          $lookup: {
-            from: 'users',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'customer'
-          }
-        },
-        { $unwind: '$customer' },
-        {
-          $project: {
-            customerInfo: {
-              id: '$customer._id',
-              username: '$customer.username',
-              email: '$customer.email'
-            },
-            totalSpent: 1,
-            orderCount: 1,
-            averageOrderValue: 1
-          }
+// ===============================
+// 2. THỐNG KÊ KHÁCH HÀNG - FIXED VERSION
+// ===============================
+
+async getCustomerStatistics(req, res) {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        created_at: {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate)
         }
-      ]);
-      
-      // Tỷ lệ khách hàng quay lại
-      const returningCustomers = await Order.aggregate([
-        {
-          $group: {
-            _id: '$user_id',
-            orderCount: { $sum: 1 }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            totalCustomers: { $sum: 1 },
-            returningCustomers: {
-              $sum: { $cond: [{ $gt: ['$orderCount', 1] }, 1, 0] }
-            }
-          }
-        },
-        {
-          $project: {
-            totalCustomers: 1,
-            returningCustomers: 1,
-            returnRate: {
-              $multiply: [
-                { $divide: ['$returningCustomers', '$totalCustomers'] },
-                100
-              ]
-            }
-          }
-        }
-      ]);
-      
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Customer statistics retrieved successfully',
-        data: {
-          totalCustomers,
-          newCustomers,
-          highValueCustomers,
-          returnRate: returningCustomers[0] || { returnRate: 0 }
-        }
-      });
-    } catch (error) {
-      console.error('Customer statistics error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null
-      });
+      };
     }
+    
+    console.log('📊 Getting customer statistics with dateFilter:', dateFilter);
+    
+    // 🔧 FIX: Sử dụng role: 'User' thay vì 'Customer' theo schema
+    const totalCustomers = await User.countDocuments({ role: 'User' });
+    console.log('👥 Total customers found:', totalCustomers);
+    
+    // Khách hàng mới theo thời gian - 🔧 FIX: role: 'User'
+    const newCustomers = await User.aggregate([
+      { $match: { role: 'User', ...dateFilter } },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$created_at' },
+            month: { $month: '$created_at' }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } }
+    ]);
+    console.log('🆕 New customers by period:', newCustomers.length, 'periods');
+    
+    // Khách hàng có giá trị cao nhất
+    const highValueCustomers = await Order.aggregate([
+      { $match: { status: 'completed' } },
+      {
+        $group: {
+          _id: '$user_id',
+          totalSpent: { $sum: '$total_amount' },
+          orderCount: { $sum: 1 },
+          averageOrderValue: { $avg: '$total_amount' }
+        }
+      },
+      { $sort: { totalSpent: -1 } },
+      { $limit: 10 },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'customer'
+        }
+      },
+      { $unwind: '$customer' },
+      // 🔧 FIX: Thêm filter để chỉ lấy users có role: 'User'
+      {
+        $match: {
+          'customer.role': 'User'
+        }
+      },
+      {
+        $project: {
+          customerInfo: {
+            id: '$customer._id',
+            username: '$customer.username',
+            email: '$customer.email',
+            role: '$customer.role', // Thêm để debug
+            phone: '$customer.phone',
+            avatar_url: '$customer.avatar_url',
+            status: '$customer.status'
+          },
+          totalSpent: 1,
+          orderCount: 1,
+          averageOrderValue: 1
+        }
+      }
+    ]);
+    console.log('💰 High value customers found:', highValueCustomers.length);
+    
+    // Tỷ lệ khách hàng quay lại - 🔧 FIX: Thêm lookup để filter role
+    const returningCustomers = await Order.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: '$user' },
+      // 🔧 FIX: Chỉ lấy orders của users có role: 'User'
+      {
+        $match: {
+          'user.role': 'User'
+        }
+      },
+      {
+        $group: {
+          _id: '$user_id',
+          orderCount: { $sum: 1 }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalCustomers: { $sum: 1 },
+          returningCustomers: {
+            $sum: { $cond: [{ $gt: ['$orderCount', 1] }, 1, 0] }
+          }
+        }
+      },
+      {
+        $project: {
+          totalCustomers: 1,
+          returningCustomers: 1,
+          returnRate: {
+            $cond: [
+              { $gt: ['$totalCustomers', 0] },
+              {
+                $multiply: [
+                  { $divide: ['$returningCustomers', '$totalCustomers'] },
+                  100
+                ]
+              },
+              0
+            ]
+          }
+        }
+      }
+    ]);
+    
+    console.log('🔄 Return rate data:', returningCustomers);
+    
+    // 🆕 THÊM: Thống kê chi tiết hơn
+    const customersByStatus = await User.aggregate([
+      { $match: { role: 'User' } },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+    
+    // 🆕 THÊM: Khách hàng theo tháng (12 tháng gần nhất)
+    const last12Months = new Date();
+    last12Months.setMonth(last12Months.getMonth() - 12);
+    
+    const customerGrowth = await User.aggregate([
+      { 
+        $match: { 
+          role: 'User',
+          created_at: { $gte: last12Months }
+        } 
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$created_at' },
+            month: { $month: '$created_at' }
+          },
+          newCustomers: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } }
+    ]);
+    
+    // 🆕 THÊM: Top khách hàng theo số đơn hàng
+    const topCustomersByOrders = await Order.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: '$user' },
+      { $match: { 'user.role': 'User' } },
+      {
+        $group: {
+          _id: '$user_id',
+          orderCount: { $sum: 1 },
+          totalSpent: { $sum: '$total_amount' },
+          customerInfo: { $first: '$user' }
+        }
+      },
+      { $sort: { orderCount: -1 } },
+      { $limit: 10 },
+      {
+        $project: {
+          customerInfo: {
+            id: '$customerInfo._id',
+            username: '$customerInfo.username',
+            email: '$customerInfo.email',
+            phone: '$customerInfo.phone'
+          },
+          orderCount: 1,
+          totalSpent: 1,
+          averageOrderValue: { $divide: ['$totalSpent', '$orderCount'] }
+        }
+      }
+    ]);
+    
+    console.log('✅ Customer statistics completed successfully');
+    
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Customer statistics retrieved successfully',
+      data: {
+        // Dữ liệu cơ bản
+        totalCustomers,
+        newCustomers,
+        highValueCustomers,
+        returnRate: returningCustomers[0] || { 
+          totalCustomers: 0, 
+          returningCustomers: 0, 
+          returnRate: 0 
+        },
+        
+        // 🆕 Dữ liệu mở rộng
+        customersByStatus,
+        customerGrowth,
+        topCustomersByOrders,
+        
+        // Metadata
+        metadata: {
+          dateFilter: dateFilter,
+          generatedAt: new Date().toISOString(),
+          totalActiveCustomers: customersByStatus.find(s => s._id === 'active')?.count || 0,
+          totalInactiveCustomers: customersByStatus.find(s => s._id === 'inactive')?.count || 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ Customer statistics error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      data: null
+    });
   }
+}
   
   // ===============================
   // 4. THỐNG KÊ DỊCH VỤ
