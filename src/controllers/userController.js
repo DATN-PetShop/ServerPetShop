@@ -527,11 +527,12 @@ const changePassword = async (req, res) => {
       });
     }
 
-    if (newPassword.length < 6) {
+    const strongPwd = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+    if (!strongPwd.test(newPassword)) {
       return res.status(400).json({
         success: false,
         statusCode: 400,
-        message: 'New password must be at least 6 characters long',
+        message: 'New password must be at least 8 characters and include uppercase, lowercase, number and special character',
         data: null
       });
     }
@@ -968,11 +969,12 @@ async function verifyOtpAndResetPassword(req, res) {
         data: null,
       });
     }
-    if (newPassword.length < 6) {
+    const strongPwd = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+    if (!strongPwd.test(newPassword)) {
       return res.status(400).json({
         success: false,
         statusCode: 400,
-        message: 'New password must be at least 6 characters long',
+        message: 'New password must be at least 8 characters and include uppercase, lowercase, number and special character',
         data: null,
       });
     }
