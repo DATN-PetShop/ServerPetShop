@@ -198,6 +198,23 @@ class SimpleChatSocket {
       // 🔔 GỬI PUSH NOTIFICATION CHO USER OFFLINE
       await this.sendPushNotificationToOfflineUsers(room, message);
 
+      // 🔔 Nếu khách gửi, thông báo cho Admin/Staff (để web admin nhận alert)
+      try {
+        if (message.sender_role === 'User') {
+          const { notifyAdmins } = require('../services/notificationService');
+          await notifyAdmins({
+            title: '💬 Tin nhắn mới từ khách hàng',
+            body: `${message.sender_id.username}: ${message.content.substring(0, 80)}`,
+            type: 'chat_admin',
+            relatedEntityId: roomId,
+            relatedEntityType: 'ChatRoom',
+            data: { roomId }
+          });
+        }
+      } catch (notifyErr) {
+        console.error('Failed to notify admins about chat message:', notifyErr);
+      }
+
       // Confirm to sender
       socket.emit('message_sent', {
         messageId: message._id,
