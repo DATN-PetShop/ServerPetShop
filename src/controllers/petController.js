@@ -523,7 +523,6 @@ async searchPets(req, res) {
     }
   }
 
-// src/controllers/petController.js - Fixed getPetsByBreed method
 async getPetsByBreed(req, res) {
   try {
     const { breedId } = req.params;
@@ -2623,12 +2622,70 @@ async getRelatedItems(req, res) {
     .limit(4)
     .lean();
 
-    // Thêm ảnh cho pets cùng breed
+    // Thêm ảnh và variants cho pets cùng breed
     for (let pet of sameBreedPets) {
+      // Thêm ảnh
       const images = await this.imageModel.find({ pet_id: pet._id })
         .select('url is_primary')
         .lean();
       pet.images = images;
+
+      // Thêm thông tin variants
+      const variants = await PetVariant.find({ 
+        pet_id: pet._id, 
+        is_available: true 
+      }).lean();
+
+      // Tính final price cho mỗi variant
+      const variantsWithPrice = await Promise.all(
+        variants.map(async (variant) => {
+          const finalPrice = pet.price + (variant.import_price || 0); // Sử dụng import_price thay vì price_adjustment
+          return {
+            ...variant,
+            final_price: finalPrice,
+            display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} years`
+          };
+        })
+      );
+
+      pet.variants = variantsWithPrice;
+
+      // Thêm variant options cho frontend filter
+      if (variantsWithPrice.length > 0) {
+        const colors = [...new Set(variantsWithPrice.map(v => v.color))].sort();
+        const genders = [...new Set(variantsWithPrice.map(v => v.gender))].sort();
+        const ages = [...new Set(variantsWithPrice.map(v => v.age))].sort((a, b) => a - b);
+        const weights = [...new Set(variantsWithPrice.map(v => v.weight))].sort((a, b) => a - b);
+
+        pet.variant_options = {
+          colors,
+          genders,
+          age_range: { min: Math.min(...ages), max: Math.max(...ages) },
+          weight_range: { min: Math.min(...weights), max: Math.max(...weights) }
+        };
+
+        // Tính display price và price range
+        const prices = variantsWithPrice.map(v => v.final_price);
+        const minPrice = Math.min(...prices);
+        const maxPrice = Math.max(...prices);
+
+        pet.display_price = minPrice;
+        pet.price_range = {
+          min: minPrice,
+          max: maxPrice,
+          hasRange: minPrice !== maxPrice
+        };
+      } else {
+        pet.variants = [];
+        pet.variant_options = {};
+        pet.display_price = pet.price;
+        pet.price_range = {
+          min: pet.price,
+          max: pet.price,
+          hasRange: false
+        };
+      }
+
       pet.itemType = 'pet';
       pet.relationshipType = 'same-breed';
     }
@@ -2773,120 +2830,185 @@ async _findProductsForPetTypeHelper(petType, limit = 4) {
   /**
    * 🎯 API TƯƠNG TỰ: Tìm thú cưng tương tự (nâng cấp từ getSimilarBreeds)
    */
-  async getSimilarPetsAdvanced(req, res) {
-    try {
-      const { petId } = req.params;
-      const { limit = 6, includeCrossCategory = false } = req.query;
+ /**
+ * 🎯 API TƯƠNG TỰ: Tìm thú cưng tương tự (nâng cấp từ getSimilarBreeds)
+ */
+async getSimilarPetsAdvanced(req, res) {
+  try {
+    const { petId } = req.params;
+    const { limit = 6, includeCrossCategory = false } = req.query;
 
-      const currentPet = await Pet.findById(petId)
-        .populate('breed_id')
-        .lean();
-
-      if (!currentPet) {
-        return res.status(404).json({
-          success: false,
-          statusCode: 404,
-          message: 'Không tìm thấy thú cưng',
-          data: null
-        });
-      }
-
-      const similarityScores = [];
-
-      // Tìm tất cả pets khác
-      const otherPets = await Pet.find({
-        _id: { $ne: petId },
-        status: 'available'
-      })
+    const currentPet = await Pet.findById(petId)
       .populate('breed_id')
       .lean();
 
-      // Tính điểm tương tự cho từng pet
-      for (let pet of otherPets) {
-        let score = 0;
-
-        // Cùng breed = 100 điểm
-        if (pet.breed_id?._id?.toString() === currentPet.breed_id?._id?.toString()) {
-          score += 100;
-        }
-        
-        // Cùng category = 80 điểm
-        else if (pet.breed_id?.category_id?.toString() === currentPet.breed_id?.category_id?.toString()) {
-          score += 80;
-        }
-
-        // Cùng type = 60 điểm
-        if (pet.type === currentPet.type) {
-          score += 60;
-        }
-
-        // Khoảng giá tương tự = 40 điểm
-        const priceDiff = Math.abs(pet.price - currentPet.price);
-        const priceRatio = priceDiff / currentPet.price;
-        if (priceRatio <= 0.3) score += 40; // Chênh lệch <= 30%
-        else if (priceRatio <= 0.5) score += 20; // Chênh lệch <= 50%
-
-        // Tuổi tương tự = 20 điểm
-        if (pet.age && currentPet.age) {
-          const ageDiff = Math.abs(pet.age - currentPet.age);
-          if (ageDiff <= 3) score += 20;
-          else if (ageDiff <= 6) score += 10;
-        }
-
-        // Cùng giới tính = 10 điểm
-        if (pet.gender === currentPet.gender) {
-          score += 10;
-        }
-
-        if (score > 0) {
-          similarityScores.push({ pet, score });
-        }
-      }
-
-      // Sắp xếp theo điểm tương tự
-      similarityScores.sort((a, b) => b.score - a.score);
-      
-      const topSimilar = similarityScores.slice(0, limit);
-
-      // Thêm ảnh cho pets tương tự
-      for (let item of topSimilar) {
-        item.pet.images = await this.imageModel.find({ pet_id: item.pet._id })
-          .select('url is_primary')
-          .lean();
-        item.pet.itemType = 'pet';
-        item.pet.similarityScore = item.score;
-      }
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        data: {
-          similarPets: topSimilar.map(item => ({
-            ...item.pet,
-            similarityScore: item.score
-          })),
-          totalAnalyzed: otherPets.length,
-          currentPet: {
-            id: currentPet._id,
-            name: currentPet.name,
-            type: currentPet.type,
-            breed: currentPet.breed_id?.name,
-            price: currentPet.price
-          }
-        },
-        message: `Tìm thấy ${topSimilar.length} pets tương tự`
-      });
-
-    } catch (error) {
-      console.error('❌ Error in getSimilarPetsAdvanced:', error);
-      res.status(500).json({
+    if (!currentPet) {
+      return res.status(404).json({
         success: false,
-        statusCode: 500,
-        message: 'Lỗi server khi tìm pets tương tự',
+        statusCode: 404,
+        message: 'Không tìm thấy thú cưng',
         data: null
       });
     }
+
+    const similarityScores = [];
+
+    // Tìm tất cả pets khác
+    const otherPets = await Pet.find({
+      _id: { $ne: petId },
+      status: 'available'
+    })
+      .populate('breed_id')
+      .lean();
+
+    // Tính điểm tương tự cho từng pet
+    for (let pet of otherPets) {
+      let score = 0;
+
+      // Cùng breed = 100 điểm
+      if (pet.breed_id?._id?.toString() === currentPet.breed_id?._id?.toString()) {
+        score += 100;
+      }
+      // Cùng category = 80 điểm (nếu includeCrossCategory là false)
+      else if (
+        !includeCrossCategory &&
+        pet.breed_id?.category_id?.toString() === currentPet.breed_id?.category_id?.toString()
+      ) {
+        score += 80;
+      }
+
+      // Cùng type = 60 điểm
+      if (pet.type === currentPet.type) {
+        score += 60;
+      }
+
+      // Khoảng giá tương tự = 40 điểm
+      const priceDiff = Math.abs(pet.price - currentPet.price);
+      const priceRatio = priceDiff / currentPet.price;
+      if (priceRatio <= 0.3) score += 40; // Chênh lệch <= 30%
+      else if (priceRatio <= 0.5) score += 20; // Chênh lệch <= 50%
+
+      // Tuổi tương tự = 20 điểm
+      if (pet.age && currentPet.age) {
+        const ageDiff = Math.abs(pet.age - currentPet.age);
+        if (ageDiff <= 3) score += 20;
+        else if (ageDiff <= 6) score += 10;
+      }
+
+      // Cùng giới tính = 10 điểm
+      if (pet.gender === currentPet.gender) {
+        score += 10;
+      }
+
+      if (score > 0) {
+        similarityScores.push({ pet, score });
+      }
+    }
+
+    // Sắp xếp theo điểm tương tự
+    similarityScores.sort((a, b) => b.score - a.score);
+
+    const topSimilar = similarityScores.slice(0, limit);
+
+    // Thêm ảnh và variants cho pets tương tự
+    for (let item of topSimilar) {
+      const pet = item.pet;
+
+      // Thêm ảnh
+      pet.images = await this.imageModel.find({ pet_id: pet._id })
+        .select('url is_primary')
+        .lean();
+
+      // 🆕 Thêm thông tin variants
+      const variants = await PetVariant.find({
+        pet_id: pet._id,
+        is_available: true
+      }).lean();
+
+      // Tính final price cho mỗi variant
+      const variantsWithPrice = await Promise.all(
+        variants.map(async (variant) => {
+          const finalPrice = pet.price + (variant.price_adjustment || 0);
+          return {
+            ...variant,
+            final_price: finalPrice,
+            display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} years`
+          };
+        })
+      );
+
+      pet.variants = variantsWithPrice;
+
+      // 🆕 Thêm variant options cho frontend filter
+      if (variantsWithPrice.length > 0) {
+        const colors = [...new Set(variantsWithPrice.map(v => v.color))].sort();
+        const genders = [...new Set(variantsWithPrice.map(v => v.gender))].sort();
+        const ages = [...new Set(variantsWithPrice.map(v => v.age))].sort((a, b) => a - b);
+        const weights = [...new Set(variantsWithPrice.map(v => v.weight))].sort((a, b) => a - b);
+
+        pet.variant_options = {
+          colors,
+          genders,
+          age_range: { min: Math.min(...ages), max: Math.max(...ages) },
+          weight_range: { min: Math.min(...weights), max: Math.max(...weights) }
+        };
+
+        // 🆕 Tính display price và price range
+        const prices = variantsWithPrice.map(v => v.final_price);
+        const minPrice = Math.min(...prices);
+        const maxPrice = Math.max(...prices);
+
+        pet.display_price = minPrice;
+        pet.price_range = {
+          min: minPrice,
+          max: maxPrice,
+          hasRange: minPrice !== maxPrice
+        };
+      } else {
+        pet.variants = [];
+        pet.variant_options = {};
+        pet.display_price = pet.price;
+        pet.price_range = {
+          min: pet.price,
+          max: pet.price,
+          hasRange: false
+        };
+      }
+
+      pet.itemType = 'pet';
+      pet.similarityScore = item.score;
+    }
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      data: {
+        similarPets: topSimilar.map(item => ({
+          ...item.pet,
+          similarityScore: item.score
+        })),
+        totalAnalyzed: otherPets.length,
+        currentPet: {
+          id: currentPet._id,
+          name: currentPet.name,
+          type: currentPet.type,
+          breed: currentPet.breed_id?.name,
+          price: currentPet.price
+        }
+      },
+      message: `Tìm thấy ${topSimilar.length} pets tương tự`
+    });
+
+  } catch (error) {
+    console.error('❌ Error in getSimilarPetsAdvanced:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Lỗi server khi tìm pets tương tự',
+      data: null
+    });
   }
+}
 }
 
 const petController = new PetController();
