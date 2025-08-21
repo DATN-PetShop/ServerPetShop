@@ -1,5 +1,7 @@
-// src/controllers/favouriteController.js - ENHANCED ERROR HANDLING
 const Favourite = require('../models/Favourite');
+const PetVariant = require('../models/PetVariant');
+const ProductImage = require('../models/ProductImage');
+const ImagePet = require('../models/ImagePet');
 
 class FavouriteController {
   // ✅ ENHANCED ADD METHOD - Better duplicate handling
@@ -130,7 +132,7 @@ class FavouriteController {
     }
   }
 
-  // ✅ GETALL METHOD - Unchanged
+  // ✅ GETALL METHOD - Enhanced with Variants
   async getAll(req, res) {
     try {
       const user_id = req.user.userId;
@@ -143,7 +145,7 @@ class FavouriteController {
         })
         .populate({
           path: 'pet_id', 
-          select: 'name price description breed_id age gender weight',
+          select: 'name description breed_id age gender weight',
           populate: {
             path: 'breed_id',
             select: 'name'
@@ -152,20 +154,75 @@ class FavouriteController {
         .sort({ created_at: -1 })
         .lean();
 
-      // ✅ MANUALLY ADD IMAGES
+      // ✅ MANUALLY ADD IMAGES AND VARIANTS
       for (let favourite of favourites) {
         if (favourite.product_id) {
-          const ProductImage = require('../models/ProductImage');
           favourite.product_id.images = await ProductImage.find({ 
             product_id: favourite.product_id._id 
           }).select('url is_primary').lean();
         }
         
         if (favourite.pet_id) {
-          const ImagePet = require('../models/ImagePet');
+          // Thêm ảnh
           favourite.pet_id.images = await ImagePet.find({ 
             pet_id: favourite.pet_id._id 
           }).select('url is_primary').lean();
+
+          // Thêm variants
+          const variants = await PetVariant.find({ 
+            pet_id: favourite.pet_id._id, 
+            is_available: true 
+          }).lean();
+
+          // Tính final_price cho mỗi variant
+          const variantsWithPrice = await Promise.all(
+            variants.map(async (variant) => {
+              const finalPrice = variant.selling_price; // Sử dụng selling_price
+              return {
+                ...variant,
+                final_price: finalPrice,
+                display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} years`
+              };
+            })
+          );
+
+          favourite.pet_id.variants = variantsWithPrice;
+
+          // Tính variant_options, display_price và price_range
+          if (variantsWithPrice.length > 0) {
+            const colors = [...new Set(variantsWithPrice.map(v => v.color))].sort();
+            const genders = [...new Set(variantsWithPrice.map(v => v.gender))].sort();
+            const ages = [...new Set(variantsWithPrice.map(v => v.age))].sort((a, b) => a - b);
+            const weights = [...new Set(variantsWithPrice.map(v => v.weight))].sort((a, b) => a - b);
+
+            favourite.pet_id.variant_options = {
+              colors,
+              genders,
+              age_range: { min: Math.min(...ages), max: Math.max(...ages) },
+              weight_range: { min: Math.min(...weights), max: Math.max(...weights) }
+            };
+
+            // Tính display_price và price_range
+            const prices = variantsWithPrice.map(v => v.final_price).filter(price => price !== null && price !== undefined);
+            const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+            const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+
+            favourite.pet_id.display_price = minPrice;
+            favourite.pet_id.price_range = {
+              min: minPrice,
+              max: maxPrice,
+              hasRange: minPrice !== maxPrice
+            };
+          } else {
+            favourite.pet_id.variants = [];
+            favourite.pet_id.variant_options = {};
+            favourite.pet_id.display_price = 0;
+            favourite.pet_id.price_range = {
+              min: 0,
+              max: 0,
+              hasRange: false
+            };
+          }
         }
       }
 
