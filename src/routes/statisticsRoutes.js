@@ -16,7 +16,11 @@ const {
   getProfitByProducts,
   getCurrentInventoryValue,
   getDashboardProfitSummary,
-  exportStatisticalReport
+  exportStatisticalReport,
+  getDailyStatistics,
+  getMonthlyStatistics,
+  getYearlyStatistics,
+  getComparativeStatistics
 } = require('../controllers/Admin/statisticsController');
 
 // Middleware: Chỉ Admin và Staff mới có thể xem thống kê
@@ -45,4 +49,13 @@ router.get('/inventory/value', statsAuth, getCurrentInventoryValue);
 router.get('/dashboard/profit', statsAuth, getDashboardProfitSummary);
 // xuất báo cáo thống kê
 router.get('/export-report', statsAuth, exportStatisticalReport);
+// 16. Thống kê theo ngày
+router.get('/daily',statsAuth, getDailyStatistics);
+
+// 17. Thống kê theo tháng
+router.get('/monthly',statsAuth, getMonthlyStatistics);
+
+// 18. Thống kê theo năm
+router.get('/yearly',statsAuth, getYearlyStatistics);
+
 module.exports = router;

@@ -2763,6 +2763,623 @@ async generateReportData(req) {
   }
 }
 
+  // ===== 1. THỐNG KÊ DOANH THU THEO NGÀY =====
+  async getDailyStatistics(req, res) {
+    try {
+      const { startDate, endDate, limit = 30 } = req.query;
+      
+      // Mặc định lấy 30 ngày gần nhất nếu không có filter
+      const endDateFilter = endDate ? new Date(endDate) : new Date();
+      const startDateFilter = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      
+      console.log('📅 Getting daily statistics from', startDateFilter, 'to', endDateFilter);
+      
+      const dailyStats = await Order.aggregate([
+        {
+          $match: {
+            created_at: { $gte: startDateFilter, $lte: endDateFilter },
+            status: { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$created_at' },
+              month: { $month: '$created_at' },
+              day: { $dayOfMonth: '$created_at' },
+              dayOfWeek: { $dayOfWeek: '$created_at' }
+            },
+            totalRevenue: { $sum: '$total_amount' },
+            totalOrders: { $sum: 1 },
+            averageOrderValue: { $avg: '$total_amount' },
+            totalCustomers: { $addToSet: '$user_id' }
+          }
+        },
+        {
+          $addFields: {
+            date: {
+              $dateFromParts: {
+                year: '$_id.year',
+                month: '$_id.month',
+                day: '$_id.day'
+              }
+            },
+            dayName: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ['$_id.dayOfWeek', 1] }, then: 'Chủ nhật' },
+                  { case: { $eq: ['$_id.dayOfWeek', 2] }, then: 'Thứ 2' },
+                  { case: { $eq: ['$_id.dayOfWeek', 3] }, then: 'Thứ 3' },
+                  { case: { $eq: ['$_id.dayOfWeek', 4] }, then: 'Thứ 4' },
+                  { case: { $eq: ['$_id.dayOfWeek', 5] }, then: 'Thứ 5' },
+                  { case: { $eq: ['$_id.dayOfWeek', 6] }, then: 'Thứ 6' },
+                  { case: { $eq: ['$_id.dayOfWeek', 7] }, then: 'Thứ 7' }
+                ],
+                default: 'N/A'
+              }
+            },
+            uniqueCustomers: { $size: '$totalCustomers' }
+          }
+        },
+        { $sort: { date: -1 } },
+        { $limit: parseInt(limit) }
+      ]);
+      
+      // Thống kê items bán ra theo ngày
+      const dailyItemStats = await OrderItem.aggregate([
+        {
+          $lookup: {
+            from: 'orders',
+            localField: 'order_id',
+            foreignField: '_id',
+            as: 'order'
+          }
+        },
+        { $unwind: '$order' },
+        {
+          $match: {
+            'order.created_at': { $gte: startDateFilter, $lte: endDateFilter },
+            'order.status': { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$order.created_at' },
+              month: { $month: '$order.created_at' },
+              day: { $dayOfMonth: '$order.created_at' }
+            },
+            totalItems: { $sum: '$quantity' },
+            uniqueProducts: { $addToSet: { 
+              pet_id: '$pet_id', 
+              product_id: '$product_id', 
+              variant_id: '$variant_id' 
+            }},
+            petsSold: { $sum: { $cond: [{ $ne: ['$pet_id', null] }, '$quantity', 0] }},
+            productsSold: { $sum: { $cond: [{ $ne: ['$product_id', null] }, '$quantity', 0] }},
+            variantsSold: { $sum: { $cond: [{ $ne: ['$variant_id', null] }, '$quantity', 0] }}
+          }
+        },
+        {
+          $addFields: {
+            date: {
+              $dateFromParts: {
+                year: '$_id.year',
+                month: '$_id.month',
+                day: '$_id.day'
+              }
+            },
+            uniqueProductCount: { $size: '$uniqueProducts' }
+          }
+        },
+        { $sort: { date: -1 } }
+      ]);
+      
+      // Merge data
+      const mergedStats = dailyStats.map(stat => {
+        const itemStat = dailyItemStats.find(item => 
+          item._id.year === stat._id.year && 
+          item._id.month === stat._id.month && 
+          item._id.day === stat._id.day
+        );
+        
+        return {
+          ...stat,
+          itemStats: itemStat || {
+            totalItems: 0,
+            uniqueProductCount: 0,
+            petsSold: 0,
+            productsSold: 0,
+            variantsSold: 0
+          }
+        };
+      });
+      
+      // Summary
+      const summary = {
+        totalDays: dailyStats.length,
+        totalRevenue: dailyStats.reduce((sum, day) => sum + day.totalRevenue, 0),
+        totalOrders: dailyStats.reduce((sum, day) => sum + day.totalOrders, 0),
+        averageDailyRevenue: dailyStats.length > 0 ? 
+          dailyStats.reduce((sum, day) => sum + day.totalRevenue, 0) / dailyStats.length : 0,
+        bestDay: dailyStats.length > 0 ? 
+          dailyStats.reduce((best, current) => 
+            current.totalRevenue > best.totalRevenue ? current : best
+          ) : null,
+        worstDay: dailyStats.length > 0 ? 
+          dailyStats.reduce((worst, current) => 
+            current.totalRevenue < worst.totalRevenue ? current : worst
+          ) : null
+      };
+      
+      console.log('✅ Daily statistics completed:', {
+        days: dailyStats.length,
+        totalRevenue: summary.totalRevenue,
+        avgDaily: summary.averageDailyRevenue
+      });
+      
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Daily statistics retrieved successfully',
+        data: {
+          dailyStats: mergedStats,
+          summary,
+          period: {
+            from: startDateFilter.toISOString().split('T')[0],
+            to: endDateFilter.toISOString().split('T')[0],
+            days: dailyStats.length
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Daily statistics error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        data: null
+      });
+    }
+  }
+
+  // ===== 2. THỐNG KÊ THEO THÁNG =====
+  async getMonthlyStatistics(req, res) {
+    try {
+      const { year, months = 12 } = req.query;
+      const currentYear = year ? parseInt(year) : new Date().getFullYear();
+      
+      console.log('📊 Getting monthly statistics for year:', currentYear);
+      
+      const monthlyStats = await Order.aggregate([
+        {
+          $match: {
+            created_at: {
+              $gte: new Date(`${currentYear}-01-01`),
+              $lte: new Date(`${currentYear}-12-31T23:59:59.999Z`)
+            },
+            status: { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$created_at' },
+              month: { $month: '$created_at' }
+            },
+            totalRevenue: { $sum: '$total_amount' },
+            totalOrders: { $sum: 1 },
+            averageOrderValue: { $avg: '$total_amount' },
+            uniqueCustomers: { $addToSet: '$user_id' },
+            maxOrderValue: { $max: '$total_amount' },
+            minOrderValue: { $min: '$total_amount' }
+          }
+        },
+        {
+          $addFields: {
+            monthName: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ['$_id.month', 1] }, then: 'Tháng 1' },
+                  { case: { $eq: ['$_id.month', 2] }, then: 'Tháng 2' },
+                  { case: { $eq: ['$_id.month', 3] }, then: 'Tháng 3' },
+                  { case: { $eq: ['$_id.month', 4] }, then: 'Tháng 4' },
+                  { case: { $eq: ['$_id.month', 5] }, then: 'Tháng 5' },
+                  { case: { $eq: ['$_id.month', 6] }, then: 'Tháng 6' },
+                  { case: { $eq: ['$_id.month', 7] }, then: 'Tháng 7' },
+                  { case: { $eq: ['$_id.month', 8] }, then: 'Tháng 8' },
+                  { case: { $eq: ['$_id.month', 9] }, then: 'Tháng 9' },
+                  { case: { $eq: ['$_id.month', 10] }, then: 'Tháng 10' },
+                  { case: { $eq: ['$_id.month', 11] }, then: 'Tháng 11' },
+                  { case: { $eq: ['$_id.month', 12] }, then: 'Tháng 12' }
+                ],
+                default: 'N/A'
+              }
+            },
+            uniqueCustomerCount: { $size: '$uniqueCustomers' }
+          }
+        },
+        { $sort: { '_id.month': 1 } }
+      ]);
+      
+      // Thống kê chi tiết items theo tháng
+      const monthlyItemStats = await OrderItem.aggregate([
+        {
+          $lookup: {
+            from: 'orders',
+            localField: 'order_id',
+            foreignField: '_id',
+            as: 'order'
+          }
+        },
+        { $unwind: '$order' },
+        {
+          $match: {
+            'order.created_at': {
+              $gte: new Date(`${currentYear}-01-01`),
+              $lte: new Date(`${currentYear}-12-31T23:59:59.999Z`)
+            },
+            'order.status': { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$order.created_at' },
+              month: { $month: '$order.created_at' }
+            },
+            totalItems: { $sum: '$quantity' },
+            totalItemRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] }},
+            petsSold: { $sum: { $cond: [{ $ne: ['$pet_id', null] }, '$quantity', 0] }},
+            productsSold: { $sum: { $cond: [{ $ne: ['$product_id', null] }, '$quantity', 0] }},
+            variantsSold: { $sum: { $cond: [{ $ne: ['$variant_id', null] }, '$quantity', 0] }},
+            avgItemPrice: { $avg: '$unit_price' }
+          }
+        },
+        { $sort: { '_id.month': 1 } }
+      ]);
+      
+      // Lấy tháng trước để so sánh
+      const previousYearStats = await Order.aggregate([
+        {
+          $match: {
+            created_at: {
+              $gte: new Date(`${currentYear - 1}-01-01`),
+              $lte: new Date(`${currentYear - 1}-12-31T23:59:59.999Z`)
+            },
+            status: { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              month: { $month: '$created_at' }
+            },
+            totalRevenue: { $sum: '$total_amount' },
+            totalOrders: { $sum: 1 }
+          }
+        }
+      ]);
+      
+      // Merge và tính growth
+      const enrichedStats = monthlyStats.map(stat => {
+        const itemStat = monthlyItemStats.find(item => 
+          item._id.month === stat._id.month
+        );
+        
+        const previousStat = previousYearStats.find(prev => 
+          prev._id.month === stat._id.month
+        );
+        
+        const revenueGrowth = previousStat ? 
+          ((stat.totalRevenue - previousStat.totalRevenue) / previousStat.totalRevenue * 100) : 0;
+        
+        const orderGrowth = previousStat ? 
+          ((stat.totalOrders - previousStat.totalOrders) / previousStat.totalOrders * 100) : 0;
+        
+        return {
+          ...stat,
+          itemStats: itemStat || {
+            totalItems: 0,
+            petsSold: 0,
+            productsSold: 0,
+            variantsSold: 0,
+            totalItemRevenue: 0,
+            avgItemPrice: 0
+          },
+          growth: {
+            revenueGrowth: Math.round(revenueGrowth * 100) / 100,
+            orderGrowth: Math.round(orderGrowth * 100) / 100,
+            previousYearRevenue: previousStat?.totalRevenue || 0,
+            previousYearOrders: previousStat?.totalOrders || 0
+          }
+        };
+      });
+      
+      // Tổng kết năm
+      const yearSummary = {
+        year: currentYear,
+        totalMonths: monthlyStats.length,
+        totalRevenue: monthlyStats.reduce((sum, month) => sum + month.totalRevenue, 0),
+        totalOrders: monthlyStats.reduce((sum, month) => sum + month.totalOrders, 0),
+        averageMonthlyRevenue: monthlyStats.length > 0 ? 
+          monthlyStats.reduce((sum, month) => sum + month.totalRevenue, 0) / monthlyStats.length : 0,
+        bestMonth: monthlyStats.length > 0 ? 
+          monthlyStats.reduce((best, current) => 
+            current.totalRevenue > best.totalRevenue ? current : best
+          ) : null,
+        worstMonth: monthlyStats.length > 0 ? 
+          monthlyStats.reduce((worst, current) => 
+            current.totalRevenue < worst.totalRevenue ? current : worst
+          ) : null,
+        totalItems: enrichedStats.reduce((sum, month) => sum + (month.itemStats?.totalItems || 0), 0)
+      };
+      
+      console.log('✅ Monthly statistics completed:', {
+        year: currentYear,
+        months: monthlyStats.length,
+        totalRevenue: yearSummary.totalRevenue
+      });
+      
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Monthly statistics retrieved successfully',
+        data: {
+          monthlyStats: enrichedStats,
+          yearSummary,
+          metadata: {
+            year: currentYear,
+            previousYear: currentYear - 1,
+            hasGrowthComparison: previousYearStats.length > 0
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Monthly statistics error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        data: null
+      });
+    }
+  }
+
+  // ===== 3. THỐNG KÊ THEO NĂM =====
+  async getYearlyStatistics(req, res) {
+    try {
+      const { startYear, endYear, limit = 5 } = req.query;
+      const currentYear = new Date().getFullYear();
+      const fromYear = startYear ? parseInt(startYear) : currentYear - parseInt(limit) + 1;
+      const toYear = endYear ? parseInt(endYear) : currentYear;
+      
+      console.log('📈 Getting yearly statistics from', fromYear, 'to', toYear);
+      
+      const yearlyStats = await Order.aggregate([
+        {
+          $match: {
+            created_at: {
+              $gte: new Date(`${fromYear}-01-01`),
+              $lte: new Date(`${toYear}-12-31T23:59:59.999Z`)
+            },
+            status: { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$created_at' }
+            },
+            totalRevenue: { $sum: '$total_amount' },
+            totalOrders: { $sum: 1 },
+            averageOrderValue: { $avg: '$total_amount' },
+            uniqueCustomers: { $addToSet: '$user_id' },
+            maxOrderValue: { $max: '$total_amount' },
+            minOrderValue: { $min: '$total_amount' },
+            ordersByMonth: {
+              $push: {
+                month: { $month: '$created_at' },
+                amount: '$total_amount'
+              }
+            }
+          }
+        },
+        {
+          $addFields: {
+            uniqueCustomerCount: { $size: '$uniqueCustomers' },
+            customerRetentionRate: {
+              $multiply: [
+                { $divide: [{ $size: '$uniqueCustomers' }, '$totalOrders'] },
+                100
+              ]
+            }
+          }
+        },
+        { $sort: { '_id.year': -1 } }
+      ]);
+      
+      // Thống kê items theo năm
+      const yearlyItemStats = await OrderItem.aggregate([
+        {
+          $lookup: {
+            from: 'orders',
+            localField: 'order_id',
+            foreignField: '_id',
+            as: 'order'
+          }
+        },
+        { $unwind: '$order' },
+        {
+          $match: {
+            'order.created_at': {
+              $gte: new Date(`${fromYear}-01-01`),
+              $lte: new Date(`${toYear}-12-31T23:59:59.999Z`)
+            },
+            'order.status': { $in: ['completed', 'delivered'] }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$order.created_at' }
+            },
+            totalItems: { $sum: '$quantity' },
+            totalItemRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] }},
+            petsSold: { $sum: { $cond: [{ $ne: ['$pet_id', null] }, '$quantity', 0] }},
+            productsSold: { $sum: { $cond: [{ $ne: ['$product_id', null] }, '$quantity', 0] }},
+            variantsSold: { $sum: { $cond: [{ $ne: ['$variant_id', null] }, '$quantity', 0] }},
+            avgItemPrice: { $avg: '$unit_price' },
+            uniqueItems: {
+              $addToSet: {
+                pet_id: '$pet_id',
+                product_id: '$product_id', 
+                variant_id: '$variant_id'
+              }
+            }
+          }
+        },
+        {
+          $addFields: {
+            uniqueItemCount: { $size: '$uniqueItems' }
+          }
+        },
+        { $sort: { '_id.year': -1 } }
+      ]);
+      
+      // Thống kê khách hàng mới theo năm
+      const yearlyCustomerStats = await User.aggregate([
+        {
+          $match: {
+            role: 'User',
+            created_at: {
+              $gte: new Date(`${fromYear}-01-01`),
+              $lte: new Date(`${toYear}-12-31T23:59:59.999Z`)
+            }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              year: { $year: '$created_at' }
+            },
+            newCustomers: { $sum: 1 },
+            customersByMonth: {
+              $push: {
+                month: { $month: '$created_at' },
+                count: 1
+              }
+            }
+          }
+        },
+        { $sort: { '_id.year': -1 } }
+      ]);
+      
+      // Merge data và tính growth
+      const enrichedStats = yearlyStats.map((stat, index) => {
+        const itemStat = yearlyItemStats.find(item => 
+          item._id.year === stat._id.year
+        );
+        
+        const customerStat = yearlyCustomerStats.find(customer => 
+          customer._id.year === stat._id.year
+        );
+        
+        // Tính growth so với năm trước
+        const previousYearStat = yearlyStats.find(prev => 
+          prev._id.year === stat._id.year - 1
+        );
+        
+        const revenueGrowth = previousYearStat ? 
+          ((stat.totalRevenue - previousYearStat.totalRevenue) / previousYearStat.totalRevenue * 100) : 0;
+        
+        const orderGrowth = previousYearStat ? 
+          ((stat.totalOrders - previousYearStat.totalOrders) / previousYearStat.totalOrders * 100) : 0;
+        
+        return {
+          ...stat,
+          itemStats: itemStat || {
+            totalItems: 0,
+            petsSold: 0,
+            productsSold: 0,
+            variantsSold: 0,
+            totalItemRevenue: 0,
+            avgItemPrice: 0,
+            uniqueItemCount: 0
+          },
+          customerStats: customerStat || {
+            newCustomers: 0
+          },
+          growth: {
+            revenueGrowth: Math.round(revenueGrowth * 100) / 100,
+            orderGrowth: Math.round(orderGrowth * 100) / 100,
+            previousYear: stat._id.year - 1,
+            previousYearRevenue: previousYearStat?.totalRevenue || 0,
+            previousYearOrders: previousYearStat?.totalOrders || 0
+          }
+        };
+      });
+      
+      // Tổng kết nhiều năm
+      const overallSummary = {
+        period: `${fromYear} - ${toYear}`,
+        totalYears: yearlyStats.length,
+        totalRevenue: yearlyStats.reduce((sum, year) => sum + year.totalRevenue, 0),
+        totalOrders: yearlyStats.reduce((sum, year) => sum + year.totalOrders, 0),
+        averageYearlyRevenue: yearlyStats.length > 0 ? 
+          yearlyStats.reduce((sum, year) => sum + year.totalRevenue, 0) / yearlyStats.length : 0,
+        bestYear: yearlyStats.length > 0 ? 
+          yearlyStats.reduce((best, current) => 
+            current.totalRevenue > best.totalRevenue ? current : best
+          ) : null,
+        worstYear: yearlyStats.length > 0 ? 
+          yearlyStats.reduce((worst, current) => 
+            current.totalRevenue < worst.totalRevenue ? current : worst
+          ) : null,
+        totalItems: enrichedStats.reduce((sum, year) => sum + (year.itemStats?.totalItems || 0), 0),
+        totalNewCustomers: enrichedStats.reduce((sum, year) => sum + (year.customerStats?.newCustomers || 0), 0),
+        compoundGrowthRate: yearlyStats.length > 1 ? 
+          Math.pow(yearlyStats[0].totalRevenue / yearlyStats[yearlyStats.length - 1].totalRevenue, 1 / (yearlyStats.length - 1)) - 1 : 0
+      };
+      
+      console.log('✅ Yearly statistics completed:', {
+        years: yearlyStats.length,
+        totalRevenue: overallSummary.totalRevenue,
+        avgYearly: overallSummary.averageYearlyRevenue
+      });
+      
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Yearly statistics retrieved successfully',
+        data: {
+          yearlyStats: enrichedStats,
+          overallSummary,
+          metadata: {
+            fromYear,
+            toYear,
+            currentYear,
+            hasMultiYearComparison: yearlyStats.length > 1
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Yearly statistics error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        data: null
+      });
+    }
+  }
+
 }
 
 
@@ -2782,5 +3399,8 @@ module.exports = {
   getCurrentInventoryValue: controller.getCurrentInventoryValue.bind(controller),
   getDashboardProfitSummary: controller.getDashboardProfitSummary.bind(controller),
   exportStatisticalReport: controller.exportStatisticalReport.bind(controller),
-  getBreedTrends: controller.getBreedTrends.bind(controller)
+  getBreedTrends: controller.getBreedTrends.bind(controller),
+  getDailyStatistics: controller.getDailyStatistics.bind(controller),
+  getMonthlyStatistics: controller.getMonthlyStatistics.bind(controller),
+  getYearlyStatistics: controller.getYearlyStatistics.bind(controller),
 };
