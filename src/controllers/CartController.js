@@ -240,147 +240,180 @@ class CartController {
 
   // 🔧 UPDATED: getCart method cho price structure mới
   async getCart(req, res) {
-    try {
-      const user_id = req.user.userId;
-      console.log('🛒 Fetching cart for user:', user_id);
+  try {
+    const user_id = req.user.userId;
+    console.log('🛒 Fetching cart for user:', user_id);
 
-      const cartItems = await Cart.find({ user_id })
-        .populate('pet_id', 'name type description status') // 🔧 REMOVED price
-        .populate('product_id', 'name price description')
-        .populate({
-          path: 'variant_id',
+    const cartItems = await Cart.find({ user_id })
+      .populate({
+        path: 'pet_id',
+        select: 'name type description status breed_id',
+        populate: {
+          path: 'breed_id',
+          select: 'name category_id',
           populate: {
+            path: 'category_id',
+            select: 'name',
+          },
+        },
+      })
+      .populate({
+        path: 'product_id',
+        select: 'name price description category_id',
+        populate: {
+          path: 'category_id',
+          select: 'name',
+        },
+      })
+      .populate({
+        path: 'variant_id',
+        populate: [
+          {
             path: 'pet_id',
-            select: 'name status type description' // 🔧 REMOVED price
-          }
-        })
-        .sort({ added_at: -1 })
-        .lean();
-
-      console.log(`📦 Found ${cartItems.length} items in cart`);
-
-      // 🔧 UPDATED: Populate images và tính final price với structure mới
-      const itemsWithDetails = await Promise.all(
-        cartItems.map(async (item) => {
-          let finalPrice = 0;
-          let itemInfo = null;
-          let itemType = 'unknown';
-
-          if (item.variant_id) {
-            console.log('🧬 Processing variant item:', item.variant_id._id);
-            
-            // Pet variant item
-            const variant = item.variant_id;
-            // 🔧 FIXED: Sử dụng selling_price thay vì price + price_adjustment
-            finalPrice = variant.selling_price || variant.import_price || 0;
-            itemType = 'variant';
-            
-            // Get pet images
-            const petImages = await Image.find({ pet_id: variant.pet_id._id }).lean();
-            
-            itemInfo = {
-              ...variant.pet_id,
-              variant: {
-                _id: variant._id,
-                color: variant.color,
-                weight: variant.weight,
-                gender: variant.gender,
-                age: variant.age,
-                selling_price: variant.selling_price,
-                import_price: variant.import_price,
-                stock_quantity: variant.stock_quantity,
-                sku: variant.sku,
-                display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} tuổi`
+            select: 'name status type description breed_id',
+            populate: {
+              path: 'breed_id',
+              select: 'name category_id',
+              populate: {
+                path: 'category_id',
+                select: 'name',
               },
-              images: petImages
-            };
+            },
+          },
+        ],
+      })
+      .sort({ added_at: -1 })
+      .lean();
 
-          } else if (item.pet_id) {
-            console.log('🐕 Processing pet item:', item.pet_id._id);
-            
-            // 🔧 UPDATED: Pet không có price - tìm giá từ variants
-            const availableVariants = await PetVariant.find({
-              pet_id: item.pet_id._id,
-              is_available: true,
-              stock_quantity: { $gt: 0 }
-            });
+    console.log(`📦 Found ${cartItems.length} items in cart`);
 
-            if (availableVariants.length > 0) {
-              // Lấy giá rẻ nhất từ variants
-              finalPrice = Math.min(...availableVariants.map(v => v.selling_price || v.import_price || 0));
-            } else {
-              // Pet không có variants available
-              finalPrice = 0;
-            }
+    // Populate images và tính final price
+    const itemsWithDetails = await Promise.all(
+      cartItems.map(async (item) => {
+        let finalPrice = 0;
+        let itemInfo = null;
+        let itemType = 'unknown';
 
-            itemType = 'pet';
-            const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
-            itemInfo = { 
-              ...item.pet_id, 
-              images: petImages,
-              hasVariants: availableVariants.length > 0
-            };
-
-          } else if (item.product_id) {
-            console.log('📦 Processing product item:', item.product_id._id);
-            
-            // Product item
-            finalPrice = item.product_id.price || 0;
-            itemType = 'product';
-            const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
-            itemInfo = { ...item.product_id, images: productImages };
-          }
-
-          console.log(`💰 Calculated price for ${itemType}:`, finalPrice);
-
-          return {
-            _id: item._id,
-            quantity: item.quantity,
-            added_at: item.added_at,
-            item_type: itemType,
-            item_info: itemInfo,
-            unit_price: finalPrice, // 🔧 ĐÂY LÀ GIÁ SẼ HIỂN THỊ TRÊN FRONTEND
-            total_price: finalPrice * item.quantity,
-            // Thêm thông tin variant nếu có
-            variant_id: item.variant_id || null
+        if (item.variant_id) {
+          console.log('🧬 Processing variant item:', item.variant_id._id);
+          
+          // Pet variant item
+          const variant = item.variant_id;
+          finalPrice = variant.selling_price || variant.import_price || 0;
+          itemType = 'variant';
+          
+          // Get pet images
+          const petImages = await Image.find({ pet_id: variant.pet_id._id }).lean();
+          
+          itemInfo = {
+            ...variant.pet_id,
+            variant: {
+              _id: variant._id,
+              color: variant.color,
+              weight: variant.weight,
+              gender: variant.gender,
+              age: variant.age,
+              selling_price: variant.selling_price,
+              import_price: variant.import_price,
+              stock_quantity: variant.stock_quantity,
+              sku: variant.sku,
+              display_name: `${variant.color} - ${variant.weight}kg - ${variant.gender} - ${variant.age} tuổi`,
+            },
+            images: petImages,
+            // Thêm category_id từ breed_id
+            category_id: variant.pet_id.breed_id ? variant.pet_id.breed_id.category_id : null,
           };
-        })
-      );
 
-      // Tính tổng
-      const totalAmount = itemsWithDetails.reduce((sum, item) => sum + item.total_price, 0);
-      const totalQuantity = itemsWithDetails.reduce((sum, item) => sum + item.quantity, 0);
+        } else if (item.pet_id) {
+          console.log('🐕 Processing pet item:', item.pet_id._id);
+          
+          // Pet không có price - tìm giá từ variants
+          const availableVariants = await PetVariant.find({
+            pet_id: item.pet_id._id,
+            is_available: true,
+            stock_quantity: { $gt: 0 },
+          });
 
-      console.log(`💰 Cart totals: Amount=${totalAmount}, Quantity=${totalQuantity}`);
-
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Cart retrieved successfully',
-        data: {
-          items: itemsWithDetails,
-          totalItems: itemsWithDetails.length,
-          totalQuantity: totalQuantity,
-          totalAmount: totalAmount,
-          summary: {
-            total_items: totalQuantity,
-            total_amount: totalAmount,
-            item_count: itemsWithDetails.length
+          if (availableVariants.length > 0) {
+            finalPrice = Math.min(...availableVariants.map(v => v.selling_price || v.import_price || 0));
+          } else {
+            finalPrice = 0;
           }
-        }
-      });
 
-    } catch (error) {
-      console.error('❌ Get cart error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        data: null,
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    }
+          itemType = 'pet';
+          const petImages = await Image.find({ pet_id: item.pet_id._id }).lean();
+          itemInfo = { 
+            ...item.pet_id, 
+            images: petImages,
+            hasVariants: availableVariants.length > 0,
+            // Thêm category_id từ breed_id
+            category_id: item.pet_id.breed_id ? item.pet_id.breed_id.category_id : null,
+          };
+
+        } else if (item.product_id) {
+          console.log('📦 Processing product item:', item.product_id._id);
+          
+          // Product item
+          finalPrice = item.product_id.price || 0;
+          itemType = 'product';
+          const productImages = await ProductImage.find({ product_id: item.product_id._id }).lean();
+          itemInfo = { 
+            ...item.product_id, 
+            images: productImages,
+            // Thêm category_id từ product
+            category_id: item.product_id.category_id || null,
+          };
+        }
+
+        console.log(`💰 Calculated price for ${itemType}:`, finalPrice);
+
+        return {
+          _id: item._id,
+          quantity: item.quantity,
+          added_at: item.added_at,
+          item_type: itemType,
+          item_info: itemInfo,
+          unit_price: finalPrice,
+          total_price: finalPrice * item.quantity,
+          variant_id: item.variant_id || null,
+        };
+      })
+    );
+
+    // Tính tổng
+    const totalAmount = itemsWithDetails.reduce((sum, item) => sum + item.total_price, 0);
+    const totalQuantity = itemsWithDetails.reduce((sum, item) => sum + item.quantity, 0);
+
+    console.log(`💰 Cart totals: Amount=${totalAmount}, Quantity=${totalQuantity}`);
+
+    res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: 'Cart retrieved successfully',
+      data: {
+        items: itemsWithDetails,
+        totalItems: itemsWithDetails.length,
+        totalQuantity: totalQuantity,
+        totalAmount: totalAmount,
+        summary: {
+          total_items: totalQuantity,
+          total_amount: totalAmount,
+          item_count: itemsWithDetails.length,
+        },
+      },
+    });
+
+  } catch (error) {
+    console.error('❌ Get cart error:', error);
+    res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: 'Internal server error',
+      data: null,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
   }
+}
 
   // 🔧 UPDATED: updateCartItem với stock check cho variants
   async updateCartItem(req, res) {
