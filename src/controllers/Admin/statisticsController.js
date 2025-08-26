@@ -1237,8 +1237,8 @@ class StatisticsController {
                 {
                   $cond: [
                     { $gt: [{ $size: '$product' }, 0] },
-                    { $ifNull: [{ $arrayElemAt: ['$product.cost_price', 0] }, 0] },
-                    0
+                    { $ifNull: [{ $arrayElemAt: ['$product.purchase_price', 0] }, 0] },
+                    0 
                   ]
                 }
               ]
