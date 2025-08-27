@@ -23,7 +23,7 @@ const reviewSchema = new mongoose.Schema({
   pet_id: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Pet', 
-    required: true, 
+    required: false, 
     description: 'ID của thú cưng liên kết với đánh giá'
   },
   user_id: { 
