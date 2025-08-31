@@ -17,7 +17,8 @@ class AppointmentController {
           message: 'Không xác thực được người dùng'
         });
       }
- // Thêm: Kiểm tra số lần no-show trong 3 tháng gần nhất
+
+      // Thêm: Kiểm tra số lần no-show trong 3 tháng gần nhất
       const threeMonthsAgo = new Date();
       threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90); // 3 tháng = 90 ngày
       const noShowCount = await Appointment.countDocuments({
@@ -230,20 +231,20 @@ class AppointmentController {
         });
       }
 
-    // Kiểm tra xem có lịch trùng không
-    console.log('createAppointment - Checking for conflicting appointments:', { appointment_date, appointment_time });
-    const existingAppointment = await Appointment.findOne({
-      appointment_date: new Date(appointment_date),
-      appointment_time,
-      status: { $nin: ['cancelled', 'no-show'] } // ✅ Thêm 'no-show' vào danh sách loại trừ
-    });
-    if (existingAppointment) {
-      console.log('createAppointment - Conflicting appointment found:', existingAppointment._id);
-      return res.status(409).json({
-        success: false,
-        message: 'Khung giờ này đã được đặt'
+      // Kiểm tra xem có lịch trùng không
+      console.log('createAppointment - Checking for conflicting appointments:', { appointment_date, appointment_time });
+      const existingAppointment = await Appointment.findOne({
+        appointment_date: new Date(appointment_date),
+        appointment_time,
+        status: { $nin: ['cancelled'] }
       });
-    }
+      if (existingAppointment) {
+        console.log('createAppointment - Conflicting appointment found:', existingAppointment._id);
+        return res.status(409).json({
+          success: false,
+          message: 'Khung giờ này đã được đặt'
+        });
+      }
 
       // Tạo lịch hẹn
       console.log('createAppointment - Creating new appointment');
@@ -256,8 +257,8 @@ class AppointmentController {
         appointment_time,
         notes,
         total_amount: service.price,
-        payment_method, // ✅ Thêm payment_method
-        vnpay_transaction_id: payment_method === 'vnpay' ? vnpay_transaction_id : null // ✅ Thêm vnpay_transaction_id nếu có
+        payment_method,
+        vnpay_transaction_id: payment_method === 'vnpay' ? vnpay_transaction_id : null
       });
 
       await appointment.save();
@@ -318,376 +319,7 @@ class AppointmentController {
     }
   }
 
-  // Lấy danh sách lịch hẹn của user với IMAGES
-  async getUserAppointments(req, res) {
-    try {
-      const user_id = req.user?.userId;
-      if (!user_id) {
-        return res.status(401).json({
-          success: false,
-          message: 'Không xác thực được người dùng'
-        });
-      }
-      const { status, page = 1, limit = 10 } = req.query;
-
-      // Tạo filter
-      const filter = { user_id };
-      if (status) {
-        filter.status = status;
-      }
-
-      // Pagination
-      const skip = (page - 1) * limit;
-      
-      const appointments = await Appointment.find(filter)
-        .populate('pet_id', 'name breed_id type age weight gender')
-        .populate('service_id', 'name price duration category')
-        .populate('staff_id', 'username email')
-        .populate('user_id', 'username email')
-        .populate('order_id', 'total_amount order_date status')
-        .sort({ appointment_date: -1, appointment_time: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean();
-
-      // POPULATE IMAGES CHO MỖI PET
-      if (appointments && appointments.length > 0) {
-        for (let appointment of appointments) {
-          if (appointment.pet_id && appointment.pet_id._id) {
-            const petImages = await Image.find({ 
-              pet_id: appointment.pet_id._id 
-            }).lean();
-            
-            appointment.pet_id.images = petImages;
-            
-            console.log(`✅ Populated ${petImages.length} images for pet ${appointment.pet_id._id} in appointment ${appointment._id}`);
-          }
-        }
-      }
-
-      const total = await Appointment.countDocuments(filter);
-
-      res.status(200).json({
-        success: true,
-        message: 'Lấy danh sách lịch hẹn thành công',
-        data: {
-          appointments,
-          pagination: {
-            currentPage: parseInt(page),
-            totalPages: Math.ceil(total / limit),
-            totalCount: total,
-            hasNextPage: page < Math.ceil(total / limit),
-            hasPrevPage: page > 1
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Get user appointments error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Lỗi server',
-        error: error.message
-      });
-    }
-  }
-
-  // Lấy chi tiết lịch hẹn với IMAGES
-  async getAppointmentById(req, res) {
-    try {
-      const user_id = req.user?.userId;
-      if (!user_id) {
-        return res.status(401).json({
-          success: false,
-          message: 'Không xác thực được người dùng'
-        });
-      }
-      const { id } = req.params;
-
-      const appointment = await Appointment.findOne({ _id: id, user_id })
-        .populate('pet_id', 'name breed_id age weight gender type')
-        .populate('service_id', 'name description price duration category')
-        .populate('staff_id', 'username email')
-        .populate('order_id', 'total_amount order_date status')
-        .lean();
-
-      if (!appointment) {
-        return res.status(404).json({
-          success: false,
-          message: 'Không tìm thấy lịch hẹn'
-        });
-      }
-
-      // POPULATE IMAGES CHO PET
-      if (appointment.pet_id && appointment.pet_id._id) {
-        const petImages = await Image.find({ 
-          pet_id: appointment.pet_id._id 
-        }).lean();
-        
-        appointment.pet_id.images = petImages;
-        
-        console.log(`✅ Populated ${petImages.length} images for pet ${appointment.pet_id._id} in appointment detail`);
-      }
-
-      res.status(200).json({
-        success: true,
-        message: 'Lấy chi tiết lịch hẹn thành công',
-        data: appointment
-      });
-    } catch (error) {
-      console.error('Get appointment by ID error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Lỗi server',
-        error: error.message
-      });
-    }
-  }
-
-  // Cập nhật lịch hẹn (chỉ khi chưa confirmed)
-  async updateAppointment(req, res) {
-    try {
-      const user_id = req.user?.userId;
-      if (!user_id) {
-        return res.status(401).json({
-          success: false,
-          message: 'Không xác thực được người dùng'
-        });
-      }
-      const { id } = req.params;
-      const { appointment_date, appointment_time, notes, payment_method, vnpay_transaction_id } = req.body;
-
-      const appointment = await Appointment.findOne({ _id: id, user_id });
-      if (!appointment) {
-        return res.status(404).json({
-          success: false,
-          message: 'Không tìm thấy lịch hẹn'
-        });
-      }
-
-      // Chỉ cho phép cập nhật khi status là pending
-      if (appointment.status !== 'pending') {
-        return res.status(400).json({
-          success: false,
-          message: 'Không thể cập nhật lịch hẹn đã được xác nhận'
-        });
-      }
-
-      // Cập nhật thông tin
-      if (appointment_date) {
-        appointment.appointment_date = new Date(appointment_date);
-      }
-      if (appointment_time) {
-        appointment.appointment_time = appointment_time;
-      }
-      if (notes !== undefined) {
-        appointment.notes = notes;
-      }
-      if (payment_method) {
-        if (!['cod', 'vnpay'].includes(payment_method)) {
-          console.log('updateAppointment - Invalid payment_method:', payment_method);
-          return res.status(400).json({
-            success: false,
-            message: 'Phương thức thanh toán phải là "cod" hoặc "vnpay"'
-          });
-        }
-        appointment.payment_method = payment_method;
-        appointment.vnpay_transaction_id = payment_method === 'vnpay' ? vnpay_transaction_id : null;
-      }
-
-      await appointment.save();
-
-      const updatedAppointment = await Appointment.findById(appointment._id)
-        .populate('pet_id', 'name breed_id type age weight gender')
-        .populate('service_id', 'name price duration')
-        .lean();
-
-      // POPULATE IMAGES CHO PET TRONG UPDATE
-      if (updatedAppointment.pet_id && updatedAppointment.pet_id._id) {
-        const petImages = await Image.find({ 
-          pet_id: updatedAppointment.pet_id._id 
-        }).lean();
-        updatedAppointment.pet_id.images = petImages;
-      }
-
-      res.status(200).json({
-        success: true,
-        message: 'Cập nhật lịch hẹn thành công',
-        data: updatedAppointment
-      });
-    } catch (error) {
-      console.error('Update appointment error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Lỗi server',
-        error: error.message
-      });
-    }
-  }
-
-  // Lấy khung giờ trống
-  async getAvailableSlots(req, res) {
-    try {
-      const { date } = req.query;
-
-      if (!date) {
-        return res.status(400).json({
-          success: false,
-          message: 'Thiếu thông tin ngày'
-        });
-      }
-
-      // Khung giờ mặc định (8:00 - 17:00)
-      const workingHours = [
-        '08:00', '09:00', '10:00', '11:00', 
-        '14:00', '15:00', '16:00', '17:00'
-      ];
-
-      // Lấy các lịch hẹn đã đặt trong ngày
-      const bookedAppointments = await Appointment.find({
-        appointment_date: new Date(date),
-      status: { $nin: ['cancelled', 'no-show'] } // ✅ Thêm 'no-show'
-      }).select('appointment_time');
-
-      const bookedSlots = bookedAppointments.map(apt => apt.appointment_time);
-      const availableSlots = workingHours.filter(time => !bookedSlots.includes(time));
-
-      res.status(200).json({
-        success: true,
-        message: 'Lấy khung giờ trống thành công',
-        data: availableSlots
-      });
-    } catch (error) {
-      console.error('Get available slots error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Lỗi server',
-        error: error.message
-      });
-    }
-  }
-
-  // Hủy lịch hẹn
-  async cancelAppointment(req, res) {
-    try {
-      const user_id = req.user?.userId;
-      if (!user_id) {
-        return res.status(401).json({
-          success: false,
-          message: 'Không xác thực được người dùng'
-        });
-      }
-      const { id } = req.params;
-
-      console.log('🔍 Cancelling appointment:', { id, user_id });
-
-      // Tìm lịch hẹn và populate thông tin cần thiết để log
-      const appointment = await Appointment.findOne({ _id: id, user_id })
-        .populate('pet_id', 'name')
-        .populate('service_id', 'name');
-        
-      if (!appointment) {
-        console.log('❌ Appointment not found:', { id, user_id });
-        return res.status(404).json({
-          success: false,
-          message: 'Không tìm thấy lịch hẹn hoặc lịch hẹn không thuộc về bạn'
-        });
-      }
-
-      console.log('📋 Current appointment details:', {
-        id: appointment._id,
-        status: appointment.status,
-        pet: appointment.pet_id?.name,
-        service: appointment.service_id?.name,
-        date: appointment.appointment_date,
-        time: appointment.appointment_time,
-        payment_method: appointment.payment_method
-      });
-
-      // CHÍNH SÁCH HỦY LỊCH: Chỉ cho phép hủy khi status là 'pending'
-      if (appointment.status !== 'pending') {
-        console.log('❌ Cannot cancel appointment with status:', appointment.status);
-        return res.status(400).json({
-          success: false,
-          message: getStatusCancelMessage(appointment.status),
-          data: {
-            currentStatus: appointment.status,
-            statusText: getStatusText(appointment.status),
-            canCancel: false
-          }
-        });
-      }
-
-      // Kiểm tra thời gian: Không được hủy lịch hẹn trong quá khứ
-      const appointmentDateTime = new Date(`${appointment.appointment_date.toISOString().split('T')[0]}T${appointment.appointment_time}`);
-      const now = new Date();
-      
-      if (appointmentDateTime <= now) {
-        console.log('❌ Cannot cancel past appointment:', { appointmentDateTime, now });
-        return res.status(400).json({
-          success: false,
-          message: 'Không thể hủy lịch hẹn đã qua thời gian đặt lịch'
-        });
-      }
-
-      // Kiểm tra thời gian hủy trước (ví dụ: phải hủy trước 2 giờ)
-      const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-      if (appointmentDateTime <= twoHoursFromNow) {
-        console.log('⚠️ Late cancellation warning:', { appointmentDateTime, twoHoursFromNow });
-        // Có thể thêm cảnh báo nhưng vẫn cho phép hủy
-        console.log('⚠️ Allowing late cancellation (less than 2 hours notice)');
-      }
-
-      // Thực hiện hủy lịch hẹn
-      const oldStatus = appointment.status;
-      appointment.status = 'cancelled';
-      appointment.updated_at = new Date();
-      
-      await appointment.save();
-
-      console.log('✅ Appointment cancelled successfully:', {
-        id: appointment._id,
-        oldStatus,
-        newStatus: appointment.status,
-        pet: appointment.pet_id?.name,
-        service: appointment.service_id?.name
-      });
-
-      // Populate thông tin đầy đủ để trả về client
-      const cancelledAppointment = await Appointment.findById(appointment._id)
-        .populate('pet_id', 'name breed_id images')
-        .populate('service_id', 'name price duration description')
-        .populate('user_id', 'username email')
-        .populate('order_id', 'total_amount order_date status');
-
-      res.status(200).json({
-        success: true,
-        message: 'Hủy lịch hẹn thành công',
-        data: cancelledAppointment
-      });
-
-      // Gửi thông báo cho người dùng về việc hủy lịch hẹn
-      try {
-        await sendAppointmentNotification(user_id, appointment._id, 'cancelled');
-      } catch (err) {
-        console.error('Failed to notify user about cancelled appointment:', err);
-      }
-    } catch (error) {
-      console.error('❌ Cancel appointment error:', {
-        message: error.message,
-        stack: error.stack,
-        appointmentId: req.params.id,
-        userId: req.user?.userId
-      });
-
-      res.status(500).json({
-        success: false,
-        message: 'Lỗi server khi hủy lịch hẹn',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-      });
-    }
-  }
-
-  async getNoShowStatus(req, res) {
+async getNoShowStatus(req, res) {
   try {
     const user_id = req.user?.userId;
     if (!user_id) {
@@ -708,8 +340,7 @@ class AppointmentController {
     console.error('Get no-show status error:', error);
     res.status(500).json({ success: false, message: 'Lỗi server' });
   }
-}
-}
+}}
 
 const getStatusCancelMessage = (status) => {
   switch (status) {

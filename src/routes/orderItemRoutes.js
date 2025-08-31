@@ -19,7 +19,7 @@ router.get('/search', auth, searchOrderItems);
 // ✅ Lấy danh sách order items với thông tin review status (version mới)
 router.get('/with-review-status', auth, getMyOrderItemsWithReviewStatus);
 // ✅ Kiểm tra trạng thái đánh giá của một order item cụ thể
-router.get('/:id/review-status', auth, checkOrderItemReviewStatus);
+router.get('/:id/review-status', auth, checkOrderItemReviewStatus);   
 router.get('/', auth, getMyOrderItems);
 router.get('/by-order/:orderId', auth, getOrderItemsByOrderId);
 router.post('/', auth, createOrderItem);

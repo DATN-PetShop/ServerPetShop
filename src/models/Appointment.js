@@ -1,4 +1,3 @@
-// src/models/Appointment.js
 const mongoose = require('mongoose');
 
 const appointmentSchema = new mongoose.Schema({
@@ -20,7 +19,16 @@ const appointmentSchema = new mongoose.Schema({
   order_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Order',
-    required: true // Bắt buộc vì lịch hẹn phải liên kết với đơn hàng
+    required: true
+  },
+  payment_method: {
+    type: String,
+    enum: ['cod', 'vnpay'],
+    required: true
+  },
+  vnpay_transaction_id: {
+    type: String,
+    required: false
   },
   appointment_date: {
     type: Date,
@@ -31,7 +39,6 @@ const appointmentSchema = new mongoose.Schema({
     required: true,
     validate: {
       validator: function(v) {
-        // Validate time format HH:MM
         return /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(v);
       },
       message: 'Thời gian phải theo định dạng HH:MM'
@@ -39,7 +46,7 @@ const appointmentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled','no-show'],
+    enum: ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no-show'],
     default: 'pending'
   },
   notes: {
@@ -66,15 +73,16 @@ const appointmentSchema = new mongoose.Schema({
   }
 });
 
-// Index để tránh đặt lịch trùng giờ
-appointmentSchema.index({ 
-  appointment_date: 1, 
-  appointment_time: 1, 
-  staff_id: 1 
-}, { 
-  unique: true, 
-  sparse: true 
-});
+// Chỉ mục duy nhất chỉ dựa trên appointment_date và appointment_time
+appointmentSchema.index(
+  { appointment_date: 1, appointment_time: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $nin: ['cancelled', 'no-show'] }
+    }
+  }
+);
 
 // Middleware để cập nhật updated_at
 appointmentSchema.pre('save', function(next) {
@@ -94,5 +102,7 @@ appointmentSchema.virtual('end_time').get(function() {
   }
   return null;
 });
+
+appointmentSchema.index({ user_id: 1, status: 1 });
 
 module.exports = mongoose.model('Appointment', appointmentSchema);
