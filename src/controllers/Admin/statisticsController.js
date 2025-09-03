@@ -1,4 +1,4 @@
-// src/controllers/statisticsController.js - ENHANCED VERSION WITH COMPLETE DATA
+// src/controllers/statisticsController.js - ENHANCED VERSION WITH COMPLETE DATA AND TIME FILTER PRESETS
 const mongoose = require('mongoose');
 const Order = require('../../models/Order');
 const OrderItem = require('../../models/OrderItem');
@@ -13,14 +13,56 @@ const Image = require('../../models/ImagePet');
 const Breed = require('../../models/Breed');
 
 class StatisticsController {
-  // 1. THỐNG KÊ DOANH THU VÀ BÁN HÀNG
+  // Helper function to calculate date range based on filter preset
+  calculateDateRange(filter) {
+  const now = new Date();
+  let startDate, endDate = new Date(now.setHours(23, 59, 59, 999)); // Đặt endDate là cuối ngày hôm nay
+
+  switch (filter) {
+    case 'today':
+      startDate = new Date(now.setHours(0, 0, 0, 0));
+      endDate = new Date(now.setHours(23, 59, 59, 999));
+      break;
+    case '7days':
+      startDate = new Date(now.setDate(now.getDate() - 7));
+      startDate.setHours(0, 0, 0, 0); // Đầu ngày 7 ngày trước
+      endDate = new Date(); // Giữ nguyên endDate là thời điểm hiện tại
+      break;
+    case '30days':
+      startDate = new Date(now.setDate(now.getDate() - 30));
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date();
+      break;
+    case '3months':
+      startDate = new Date(now.setMonth(now.getMonth() - 3));
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date();
+      break;
+    case 'thisyear':
+      startDate = new Date(now.getFullYear(), 0, 1);
+      endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      break;
+    default:
+      return { startDate: null, endDate: null };
+  }
+
+  return { startDate, endDate };
+}
+
   async getRevenueStatistics(req, res) {
     try {
-      const { startDate, endDate, period = 'month' } = req.query;
-      
+      let { startDate, endDate, period = 'month', filter } = req.query;
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
       let dateFilter = {};
       let groupBy = {};
-      
+
       if (startDate && endDate) {
         dateFilter = {
           created_at: {
@@ -29,7 +71,7 @@ class StatisticsController {
           }
         };
       }
-      
+
       // Xác định cách group theo period
       switch (period) {
         case 'day':
@@ -57,7 +99,7 @@ class StatisticsController {
           };
           break;
       }
-      
+
       const revenueByTime = await Order.aggregate([
         { $match: { ...dateFilter, status: 'completed' } },
         {
@@ -70,7 +112,7 @@ class StatisticsController {
         },
         { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } }
       ]);
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -87,14 +129,24 @@ class StatisticsController {
       });
     }
   }
+
   // 2. THỐNG KÊ TOP SẢN PHẨM BÁN CHẠY
   async getTopSellingItems(req, res) {
     try {
-      const { limit = 10, type = 'all' } = req.query;
-      
-      console.log('🔍 Getting top selling items with params:', { limit, type });
-      
-      // Build match condition
+      let { limit = 10, type = 'all', startDate, endDate, filter } = req.query;
+
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
+      console.log('🔍 Getting top selling items with params:', { limit, type, startDate, endDate });
+
+      // Build match condition for item type
       let matchCondition = {};
       if (type === 'pet') {
         matchCondition = { pet_id: { $ne: null } };
@@ -103,9 +155,18 @@ class StatisticsController {
       } else if (type === 'variant') {
         matchCondition = { variant_id: { $ne: null } };
       }
-      
+
+      // Add date filter to order match
+      let orderMatch = { 'order.status': 'completed' };
+      if (startDate && endDate) {
+        orderMatch['order.created_at'] = {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate)
+        };
+      }
+
       console.log('📋 Match condition:', matchCondition);
-      
+
       // Get top selling items with proper aggregation
       const topItems = await OrderItem.aggregate([
         // Step 1: Join with orders and filter completed orders
@@ -118,8 +179,8 @@ class StatisticsController {
           }
         },
         { $unwind: '$order' },
-        { $match: { 'order.status': 'completed', ...matchCondition } },
-        
+        { $match: { ...orderMatch, ...matchCondition } },
+
         // Step 2: Group by item type and calculate totals
         {
           $group: {
@@ -134,11 +195,11 @@ class StatisticsController {
             averagePrice: { $avg: '$unit_price' }
           }
         },
-        
+
         // Step 3: Sort by quantity sold
         { $sort: { totalQuantity: -1 } },
         { $limit: parseInt(limit) },
-        
+
         // Step 4: Add item type classification
         {
           $addFields: {
@@ -158,13 +219,13 @@ class StatisticsController {
           }
         }
       ]);
-      
+
       console.log('📊 Aggregation results before lookup:', topItems.length, 'items');
-      
+
       // Step 5: Manually populate data for each item type
       const enrichedItems = await Promise.all(topItems.map(async (item) => {
         let itemData = { ...item };
-        
+
         try {
           if (item.item_type === 'variant' && item._id.variant_id) {
             // Populate variant with pet info and images
@@ -181,11 +242,11 @@ class StatisticsController {
                 }
               })
               .lean();
-            
+
             if (variant && variant.pet_id) {
               // Get pet images
               const images = await Image.find({ pet_id: variant.pet_id._id }).lean();
-              
+
               itemData.variant = {
                 ...variant,
                 pet_info: {
@@ -196,7 +257,7 @@ class StatisticsController {
               itemData.display_name = `${variant.pet_id.name} (${variant.color || 'N/A'})`;
               itemData.display_price = variant.pet_id.price + (variant.price_adjustment || 0);
             }
-            
+
           } else if (item.item_type === 'pet' && item._id.pet_id) {
             // Populate pet with breed and images
             const pet = await Pet.findById(item._id.pet_id)
@@ -209,11 +270,11 @@ class StatisticsController {
                 }
               })
               .lean();
-            
+
             if (pet) {
               // Get pet images
               const images = await Image.find({ pet_id: pet._id }).lean();
-              
+
               itemData.pet = {
                 ...pet,
                 images: images || []
@@ -221,17 +282,17 @@ class StatisticsController {
               itemData.display_name = pet.name;
               itemData.display_price = pet.price;
             }
-            
+
           } else if (item.item_type === 'product' && item._id.product_id) {
             // Populate product with category and images
             const product = await Product.findById(item._id.product_id)
               .populate('category_id', 'name')
               .lean();
-            
+
             if (product) {
               // Get product images
               const images = await ProductImage.find({ product_id: product._id }).lean();
-              
+
               itemData.product = {
                 ...product,
                 images: images || []
@@ -240,26 +301,26 @@ class StatisticsController {
               itemData.display_price = product.price;
             }
           }
-          
+
           // Add calculated fields
           itemData.revenue_per_unit = itemData.totalRevenue / itemData.totalQuantity;
           itemData.performance_score = itemData.totalQuantity * 0.6 + (itemData.totalRevenue / 1000) * 0.4;
-          
+
         } catch (populateError) {
           console.error(`❌ Error populating ${item.item_type}:`, populateError);
           itemData.error = `Failed to load ${item.item_type} details`;
         }
-        
+
         return itemData;
       }));
-      
+
       // Filter out items that couldn't be populated
       const validItems = enrichedItems.filter(item => 
         item.pet || item.product || item.variant || item.error
       );
-      
+
       console.log('✅ Successfully processed', validItems.length, 'items');
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -271,7 +332,7 @@ class StatisticsController {
         },
         data: validItems
       });
-      
+
     } catch (error) {
       console.error('❌ Top selling items error:', error);
       res.status(500).json({
@@ -283,8 +344,10 @@ class StatisticsController {
       });
     }
   }
-// CẬP NHẬT THỐNG KÊ SẢN PHẨM VÀ THÚ CƯNG
+
+  // CẬP NHẬT THỐNG KÊ SẢN PHẨM VÀ THÚ CƯNG
   async getInventoryStatistics(req, res) {
+    // Inventory is current state, no time filter needed
     try {
       console.log('📊 Getting comprehensive inventory statistics...');
 
@@ -1178,11 +1241,21 @@ class StatisticsController {
       });
     }
   }
-// CẬP NHẬT THỐNG KÊ PROFIT/LỢI NHUẬN
+
+  // CẬP NHẬT THỐNG KÊ PROFIT/LỢI NHUẬN
   async getProfitOverview(req, res) {
     try {
-      const { startDate, endDate } = req.query;
-      
+      let { startDate, endDate, filter } = req.query;
+
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
       let orderDateFilter = {};
       if (startDate || endDate) {
         orderDateFilter['order.created_at'] = {};
@@ -1331,11 +1404,21 @@ class StatisticsController {
       });
     }
   }
-// LẤY THỐNG KÊ LỢI NHUẬN THEO SẢN PHẨM
+
+  // LẤY THỐNG KÊ LỢI NHUẬN THEO SẢN PHẨM
   async getProfitByProducts(req, res) {
     try {
-      const { startDate, endDate, limit = 10, type = 'all' } = req.query;
-      
+      let { startDate, endDate, limit = 10, type = 'all', filter } = req.query;
+
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
       let dateFilter = {};
       if (startDate || endDate) {
         dateFilter.created_at = {};
@@ -1521,8 +1604,10 @@ class StatisticsController {
       });
     }
   }
-// 1. THỐNG KÊ TỒN KHO HIỆN TẠI
+
+  // 1. THỐNG KÊ TỒN KHO HIỆN TẠI
   async getCurrentInventoryValue(req, res) {
+    // No time filter for current inventory
     try {
       // Tính tổng giá trị kho từ variants
       const variantValue = await PetVariant.aggregate([
@@ -1626,11 +1711,21 @@ class StatisticsController {
       });
     }
   }
+
   // 2. THỐNG KÊ TRẠNG THÁI ĐƠN HÀNG
   async getOrderStatusStatistics(req, res) {
     try {
-      const { startDate, endDate } = req.query;
-      
+      let { startDate, endDate, filter } = req.query;
+
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
       let dateFilter = {};
       if (startDate && endDate) {
         dateFilter = {
@@ -1640,7 +1735,7 @@ class StatisticsController {
           }
         };
       }
-      
+
       const statusStats = await Order.aggregate([
         { $match: dateFilter },
         {
@@ -1652,7 +1747,7 @@ class StatisticsController {
         },
         { $sort: { count: -1 } }
       ]);
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -1669,11 +1764,21 @@ class StatisticsController {
       });
     }
   }
+
   // 2. THỐNG KÊ KHÁCH HÀNG
   async getCustomerStatistics(req, res) {
     try {
-      const { startDate, endDate } = req.query;
-      
+      let { startDate, endDate, filter } = req.query;
+
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
       let dateFilter = {};
       if (startDate && endDate) {
         dateFilter = {
@@ -1683,13 +1788,13 @@ class StatisticsController {
           }
         };
       }
-      
+
       console.log('📊 Getting customer statistics with dateFilter:', dateFilter);
-      
+
       // 🔧 FIX: Sử dụng role: 'User' thay vì 'Customer' theo schema
       const totalCustomers = await User.countDocuments({ role: 'User' });
       console.log('👥 Total customers found:', totalCustomers);
-      
+
       // Khách hàng mới theo thời gian - 🔧 FIX: role: 'User'
       const newCustomers = await User.aggregate([
         { $match: { role: 'User', ...dateFilter } },
@@ -1705,7 +1810,7 @@ class StatisticsController {
         { $sort: { '_id.year': 1, '_id.month': 1 } }
       ]);
       console.log('🆕 New customers by period:', newCustomers.length, 'periods');
-      
+
       // Khách hàng có giá trị cao nhất
       const highValueCustomers = await Order.aggregate([
         { $match: { status: 'completed' } },
@@ -1752,7 +1857,7 @@ class StatisticsController {
         }
       ]);
       console.log('💰 High value customers found:', highValueCustomers.length);
-      
+
       // Tỷ lệ khách hàng quay lại - 🔧 FIX: Thêm lookup để filter role
       const returningCustomers = await Order.aggregate([
         {
@@ -1804,9 +1909,9 @@ class StatisticsController {
           }
         }
       ]);
-      
+
       console.log('🔄 Return rate data:', returningCustomers);
-      
+
       // 🆕 THÊM: Thống kê chi tiết hơn
       const customersByStatus = await User.aggregate([
         { $match: { role: 'User' } },
@@ -1818,11 +1923,11 @@ class StatisticsController {
         },
         { $sort: { count: -1 } }
       ]);
-      
+
       // 🆕 THÊM: Khách hàng theo tháng (12 tháng gần nhất)
       const last12Months = new Date();
       last12Months.setMonth(last12Months.getMonth() - 12);
-      
+
       const customerGrowth = await User.aggregate([
         { 
           $match: { 
@@ -1841,7 +1946,7 @@ class StatisticsController {
         },
         { $sort: { '_id.year': 1, '_id.month': 1 } }
       ]);
-      
+
       // 🆕 THÊM: Top khách hàng theo số đơn hàng
       const topCustomersByOrders = await Order.aggregate([
         {
@@ -1878,9 +1983,9 @@ class StatisticsController {
           }
         }
       ]);
-      
+
       console.log('✅ Customer statistics completed successfully');
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -1895,12 +2000,12 @@ class StatisticsController {
             returningCustomers: 0, 
             returnRate: 0 
           },
-          
+
           // 🆕 Dữ liệu mở rộng
           customersByStatus,
           customerGrowth,
           topCustomersByOrders,
-          
+
           // Metadata
           metadata: {
             dateFilter: dateFilter,
@@ -1921,11 +2026,21 @@ class StatisticsController {
       });
     }
   }
+
   // 4. THỐNG KÊ DỊCH VỤ
   async getServiceStatistics(req, res) {
     try {
-      const { startDate, endDate } = req.query;
-      
+      let { startDate, endDate, filter } = req.query;
+
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
       let dateFilter = {};
       if (startDate && endDate) {
         dateFilter = {
@@ -1935,7 +2050,7 @@ class StatisticsController {
           }
         };
       }
-      
+
       // Số lượng lịch hẹn theo thời gian
       const appointmentsByTime = await Appointment.aggregate([
         { $match: dateFilter },
@@ -1951,7 +2066,7 @@ class StatisticsController {
         },
         { $sort: { '_id.year': 1, '_id.month': 1 } }
       ]);
-      
+
       // Dịch vụ phổ biến nhất
       const popularServices = await Appointment.aggregate([
         { $match: dateFilter },
@@ -1974,7 +2089,7 @@ class StatisticsController {
         },
         { $unwind: '$service' }
       ]);
-      
+
       // Tỷ lệ hoàn thành lịch hẹn
       const completionRate = await Appointment.aggregate([
         { $match: dateFilter },
@@ -2001,7 +2116,7 @@ class StatisticsController {
           }
         }
       ]);
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -2022,13 +2137,14 @@ class StatisticsController {
       });
     }
   }
+
   // 6. DASHBOARD TỔNG QUAN
   async getDashboardOverview(req, res) {
     try {
       const today = new Date();
       const startOfDay = new Date(today.setHours(0, 0, 0, 0));
       const endOfDay = new Date(today.setHours(23, 59, 59, 999));
-      
+
       // KPI chính hôm nay
       const todayRevenue = await Order.aggregate([
         {
@@ -2045,18 +2161,18 @@ class StatisticsController {
           }
         }
       ]);
-      
+
       const newCustomersToday = await User.countDocuments({
         role: 'Customer',
         created_at: { $gte: startOfDay, $lte: endOfDay }
       });
-      
+
       // Cảnh báo
       const pendingOrders = await Order.countDocuments({
         status: 'pending',
         created_at: { $lt: new Date(Date.now() - 24 * 60 * 60 * 1000) } // > 24h
       });
-      
+
       let lowStockAlert = 0;
       try {
         lowStockAlert = await Product.countDocuments({
@@ -2065,7 +2181,7 @@ class StatisticsController {
       } catch (error) {
         console.log('⚠️ Product stock field not available for low stock alert');
       }
-      
+
       // Top performers hôm nay
       const todayTopProducts = await OrderItem.aggregate([
         {
@@ -2093,7 +2209,7 @@ class StatisticsController {
         { $sort: { quantity: -1 } },
         { $limit: 5 }
       ]);
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -2121,12 +2237,28 @@ class StatisticsController {
       });
     }
   }
-// 7. THỐNG KÊ TỪNG GIỐNG THÚ CƯNG
+
+  // 7. THỐNG KÊ TỪNG GIỐNG THÚ CƯNG
   async getBreedTrends(req, res) {
     try {
-      const { months = 6 } = req.query;
-      const monthsAgo = new Date(new Date().setMonth(new Date().getMonth() - parseInt(months)));
-      
+      let { months = 6, startDate, endDate, filter } = req.query;
+      let monthsAgo = new Date(new Date().setMonth(new Date().getMonth() - parseInt(months)));
+
+      // Apply preset filter if provided, overriding months
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+          monthsAgo = dateRange.startDate; // Override monthsAgo
+        }
+      }
+
+      // Use custom dates if provided
+      if (startDate && endDate) {
+        monthsAgo = new Date(startDate);
+      }
+
       const breedTrends = await Pet.aggregate([
         {
           $match: {
@@ -2172,7 +2304,7 @@ class StatisticsController {
         { $sort: { totalAdded: -1 } },
         { $limit: 10 }
       ]);
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -2193,35 +2325,61 @@ class StatisticsController {
       });
     }
   }
-// 8. THỐNG KÊ HIỆU SUẤT SẢN PHẨM
+
+  // 8. THỐNG KÊ HIỆU SUẤT SẢN PHẨM
   async getProductPerformance(req, res) {
     try {
+      let { startDate, endDate, filter } = req.query;
+
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
+      let salesPipeline = [
+        {
+          $match: {
+            $expr: { $eq: ['$product_id', '$$productId'] }
+          }
+        },
+        {
+          $lookup: {
+            from: 'orders',
+            localField: 'order_id',
+            foreignField: '_id',
+            as: 'order'
+          }
+        },
+        { $unwind: '$order' },
+        {
+          $match: {
+            'order.status': 'completed'
+          }
+        }
+      ];
+
+      // Add date filter if provided
+      if (startDate && endDate) {
+        salesPipeline.push({
+          $match: {
+            'order.created_at': {
+              $gte: new Date(startDate),
+              $lte: new Date(endDate)
+            }
+          }
+        });
+      }
+
       const productPerformance = await Product.aggregate([
         {
           $lookup: {
             from: 'orderitems',
             let: { productId: '$_id' },
-            pipeline: [
-              {
-                $match: {
-                  $expr: { $eq: ['$product_id', '$productId'] }
-                }
-              },
-              {
-                $lookup: {
-                  from: 'orders',
-                  localField: 'order_id',
-                  foreignField: '_id',
-                  as: 'order'
-                }
-              },
-              { $unwind: '$order' },
-              {
-                $match: {
-                  'order.status': 'completed'
-                }
-              }
-            ],
+            pipeline: salesPipeline,
             as: 'sales'
           }
         },
@@ -2254,7 +2412,7 @@ class StatisticsController {
         { $sort: { performanceScore: -1 } },
         { $limit: 50 }
       ]);
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
@@ -2272,188 +2430,197 @@ class StatisticsController {
     }
   }
 
-async getProfitByPeriod(req, res) {
-  try {
-    const { startDate, endDate, period = 'day' } = req.query;
-    
-    let matchStage = {
-      status: { $in: ['completed', 'delivered'] }
-    };
+  async getProfitByPeriod(req, res) {
+    try {
+      let { startDate, endDate, period = 'day', filter } = req.query;
 
-    if (startDate || endDate) {
-      matchStage.created_at = {};
-      if (startDate) matchStage.created_at.$gte = new Date(startDate);
-      if (endDate) matchStage.created_at.$lte = new Date(endDate);
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
+      let matchStage = {
+        status: { $in: ['completed', 'delivered'] }
+      };
+
+      if (startDate || endDate) {
+        matchStage.created_at = {};
+        if (startDate) matchStage.created_at.$gte = new Date(startDate);
+        if (endDate) matchStage.created_at.$lte = new Date(endDate);
+      }
+
+      // Định nghĩa group stage theo period
+      let groupByPeriod;
+      switch (period) {
+        case 'day':
+          groupByPeriod = {
+            year: { $year: '$created_at' },
+            month: { $month: '$created_at' },
+            day: { $dayOfMonth: '$created_at' }
+          };
+          break;
+        case 'week':
+          groupByPeriod = {
+            year: { $year: '$created_at' },
+            week: { $week: '$created_at' }
+          };
+          break;
+        case 'month':
+          groupByPeriod = {
+            year: { $year: '$created_at' },
+            month: { $month: '$created_at' }
+          };
+          break;
+        case 'year':
+          groupByPeriod = {
+            year: { $year: '$created_at' }
+          };
+          break;
+        default:
+          groupByPeriod = {
+            year: { $year: '$created_at' },
+            month: { $month: '$created_at' },
+            day: { $dayOfMonth: '$created_at' }
+          };
+      }
+
+      console.log(`📊 Getting profit by ${period} with filter:`, matchStage);
+
+      const profitByPeriod = await Order.aggregate([
+        { $match: matchStage },
+        {
+          $lookup: {
+            from: 'orderitems',
+            localField: '_id',
+            foreignField: 'order_id',
+            as: 'items'
+          }
+        },
+        { $unwind: '$items' },
+        {
+          $lookup: {
+            from: 'pets',
+            localField: 'items.pet_id',
+            foreignField: '_id',
+            as: 'pet'
+          }
+        },
+        {
+          $lookup: {
+            from: 'products',
+            localField: 'items.product_id',
+            foreignField: '_id',
+            as: 'product'
+          }
+        },
+        {
+          $lookup: {
+            from: 'petvariants',
+            localField: 'items.variant_id',
+            foreignField: '_id',
+            as: 'variant'
+          }
+        },
+        {
+          $addFields: {
+            // 🔧 FIX: Sử dụng purchase_price cho Product
+            itemCostPrice: {
+              $cond: [
+                { $gt: [{ $size: '$pet' }, 0] },
+                { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+                {
+                  $cond: [
+                    { $gt: [{ $size: '$product' }, 0] },
+                    // 🔧 FIX: Dùng purchase_price thay vì price * 0.7
+                    { 
+                      $multiply: [
+                        '$items.quantity', 
+                        {
+                          $ifNull: [
+                            { $arrayElemAt: ['$product.purchase_price', 0] },
+                            { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
+                          ]
+                        }
+                      ] 
+                    },
+                    {
+                      $cond: [
+                        { $gt: [{ $size: '$variant' }, 0] },
+                        { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
+                        { $multiply: ['$items.quantity', { $multiply: ['$items.unit_price', 0.7] }] }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
+          }
+        },
+        {
+          $group: {
+            _id: groupByPeriod,
+            totalRevenue: { $sum: '$itemRevenue' },
+            totalCostPrice: { $sum: '$itemCostPrice' },
+            totalOrders: { $addToSet: '$_id' },
+            totalItems: { $sum: '$items.quantity' }
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            totalRevenue: 1,
+            totalCostPrice: 1,
+            totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
+            profitMargin: {
+              $cond: [
+                { $gt: ['$totalRevenue', 0] },
+                {
+                  $multiply: [
+                    { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
+                    100
+                  ]
+                },
+                0
+              ]
+            },
+            totalOrders: { $size: '$totalOrders' },
+            totalItems: 1
+          }
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1, '_id.week': 1 } }
+      ]);
+
+      console.log(`✅ Found ${profitByPeriod.length} periods with profit data`);
+
+      res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: 'Profit by period retrieved successfully',
+        data: profitByPeriod
+      });
+
+    } catch (error) {
+      console.error('❌ Profit by period error:', error);
+      res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Internal server error',
+        data: null
+      });
     }
-
-    // Định nghĩa group stage theo period
-    let groupByPeriod;
-    switch (period) {
-      case 'day':
-        groupByPeriod = {
-          year: { $year: '$created_at' },
-          month: { $month: '$created_at' },
-          day: { $dayOfMonth: '$created_at' }
-        };
-        break;
-      case 'week':
-        groupByPeriod = {
-          year: { $year: '$created_at' },
-          week: { $week: '$created_at' }
-        };
-        break;
-      case 'month':
-        groupByPeriod = {
-          year: { $year: '$created_at' },
-          month: { $month: '$created_at' }
-        };
-        break;
-      case 'year':
-        groupByPeriod = {
-          year: { $year: '$created_at' }
-        };
-        break;
-      default:
-        groupByPeriod = {
-          year: { $year: '$created_at' },
-          month: { $month: '$created_at' },
-          day: { $dayOfMonth: '$created_at' }
-        };
-    }
-
-    console.log(`📊 Getting profit by ${period} with filter:`, matchStage);
-
-    const profitByPeriod = await Order.aggregate([
-      { $match: matchStage },
-      {
-        $lookup: {
-          from: 'orderitems',
-          localField: '_id',
-          foreignField: 'order_id',
-          as: 'items'
-        }
-      },
-      { $unwind: '$items' },
-      {
-        $lookup: {
-          from: 'pets',
-          localField: 'items.pet_id',
-          foreignField: '_id',
-          as: 'pet'
-        }
-      },
-      {
-        $lookup: {
-          from: 'products',
-          localField: 'items.product_id',
-          foreignField: '_id',
-          as: 'product'
-        }
-      },
-      {
-        $lookup: {
-          from: 'petvariants',
-          localField: 'items.variant_id',
-          foreignField: '_id',
-          as: 'variant'
-        }
-      },
-      {
-        $addFields: {
-          // 🔧 FIX: Sử dụng purchase_price cho Product
-          itemCostPrice: {
-            $cond: [
-              { $gt: [{ $size: '$pet' }, 0] },
-              { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-              {
-                $cond: [
-                  { $gt: [{ $size: '$product' }, 0] },
-                  // 🔧 FIX: Dùng purchase_price thay vì price * 0.7
-                  { 
-                    $multiply: [
-                      '$items.quantity', 
-                      {
-                        $ifNull: [
-                          { $arrayElemAt: ['$product.purchase_price', 0] },
-                          { $multiply: [{ $arrayElemAt: ['$product.price', 0] }, 0.7] } // Fallback
-                        ]
-                      }
-                    ] 
-                  },
-                  {
-                    $cond: [
-                      { $gt: [{ $size: '$variant' }, 0] },
-                      { $multiply: ['$items.quantity', { $arrayElemAt: ['$pet.price', 0] }] },
-                      { $multiply: ['$items.quantity', { $multiply: ['$items.unit_price', 0.7] }] }
-                    ]
-                  }
-                ]
-              }
-            ]
-          },
-          itemRevenue: { $multiply: ['$items.quantity', '$items.unit_price'] }
-        }
-      },
-      {
-        $group: {
-          _id: groupByPeriod,
-          totalRevenue: { $sum: '$itemRevenue' },
-          totalCostPrice: { $sum: '$itemCostPrice' },
-          totalOrders: { $addToSet: '$_id' },
-          totalItems: { $sum: '$items.quantity' }
-        }
-      },
-      {
-        $project: {
-          _id: 1,
-          totalRevenue: 1,
-          totalCostPrice: 1,
-          totalProfit: { $subtract: ['$totalRevenue', '$totalCostPrice'] },
-          profitMargin: {
-            $cond: [
-              { $gt: ['$totalRevenue', 0] },
-              {
-                $multiply: [
-                  { $divide: [{ $subtract: ['$totalRevenue', '$totalCostPrice'] }, '$totalRevenue'] },
-                  100
-                ]
-              },
-              0
-            ]
-          },
-          totalOrders: { $size: '$totalOrders' },
-          totalItems: 1
-        }
-      },
-      { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1, '_id.week': 1 } }
-    ]);
-
-    console.log(`✅ Found ${profitByPeriod.length} periods with profit data`);
-
-    res.status(200).json({
-      success: true,
-      statusCode: 200,
-      message: 'Profit by period retrieved successfully',
-      data: profitByPeriod
-    });
-
-  } catch (error) {
-    console.error('❌ Profit by period error:', error);
-    res.status(500).json({
-      success: false,
-      statusCode: 500,
-      message: 'Internal server error',
-      data: null
-    });
   }
-}
 
   async getDashboardProfitSummary(req, res) {
     try {
       const today = new Date();
       const startOfDay = new Date(today.setHours(0, 0, 0, 0));
       const endOfDay = new Date(today.setHours(23, 59, 59, 999));
-      
+
       // Profit hôm nay
       const todayProfit = await Order.aggregate([
         {
@@ -2538,21 +2705,21 @@ async getProfitByPeriod(req, res) {
           }
         }
       ]);
-      
+
       const result = todayProfit[0] || {
         totalRevenue: 0,
         totalCostPrice: 0,
         totalProfit: 0,
         profitMargin: 0
       };
-      
+
       res.status(200).json({
         success: true,
         statusCode: 200,
         message: 'Dashboard profit summary retrieved successfully',
         data: result
       });
-      
+
     } catch (error) {
       console.error('Dashboard profit summary error:', error);
       res.status(500).json({
@@ -2563,270 +2730,135 @@ async getProfitByPeriod(req, res) {
       });
     }
   }
- // Fixed exportStatisticalReport method
-async exportStatisticalReport(req, res) {
-  try {
-    // Tạo mock res object đầy đủ để tránh lỗi
-    const mockRes = {
-      status: (code) => ({
+
+  // Fixed exportStatisticalReport method
+  async exportStatisticalReport(req, res) {
+    try {
+      // Tạo mock res object đầy đủ để tránh lỗi
+      const mockRes = {
+        status: (code) => ({
+          json: (data) => data
+        }),
         json: (data) => data
-      }),
-      json: (data) => data
-    };
-
-    // Hoặc gọi trực tiếp aggregation thay vì gọi method
-    // Cách 1: Sử dụng mock res
-    const revenueData = await this.getRevenueStatistics(req, mockRes);
-    const topSellingData = await this.getTopSellingItems(req, mockRes);
-    const orderStatusData = await this.getOrderStatusStatistics(req, mockRes);
-    // ... các method khác
-
-    // Hoặc Cách 2: Tách logic aggregation ra helper methods
-    const reportData = await this.generateReportData(req);
-
-    // Define CSV fields
-    const fields = [
-      { label: 'Section', value: 'section' },
-      { label: 'Metric', value: 'metric' },
-    ];
-
-    // Import json2csv nếu chưa có
-    const { Parser } = require('json2csv');
-    
-    // Generate CSV
-    const json2csvParser = new Parser({ fields });
-    const csv = json2csvParser.parse(reportData);
-
-    // Set response headers for CSV download
-    res.header('Content-Type', 'text/csv');
-    res.attachment(`statistical-report-${new Date().toISOString().split('T')[0]}.csv`);
-    return res.send(csv);
-  } catch (error) {
-    console.error('Error generating report:', error);
-    return res.status(500).json({
-      success: false,
-      statusCode: 500,
-      message: 'Lỗi khi xuất báo cáo thống kê',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-    });
-  }
-}
-
-// Cách 2: Tạo helper method để generate data mà không cần res
-async generateReportData(req) {
-  const reportData = [];
-  
-  try {
-    // Revenue Statistics - Gọi trực tiếp aggregation
-    const { startDate, endDate, period = 'month' } = req.query;
-    
-    let dateFilter = {};
-    let groupBy = {};
-    
-    if (startDate && endDate) {
-      dateFilter = {
-        created_at: {
-          $gte: new Date(startDate),
-          $lte: new Date(endDate)
-        }
       };
+
+      // Hoặc Cách 2: Tách logic aggregation ra helper methods
+      const reportData = await this.generateReportData(req);
+
+      // Define CSV fields
+      const fields = [
+        { label: 'Section', value: 'section' },
+        { label: 'Metric', value: 'metric' },
+      ];
+
+      // Import json2csv nếu chưa có
+      const { Parser } = require('json2csv');
+
+      // Generate CSV
+      const json2csvParser = new Parser({ fields });
+      const csv = json2csvParser.parse(reportData);
+
+      // Set response headers for CSV download
+      res.header('Content-Type', 'text/csv');
+      res.attachment(`statistical-report-${new Date().toISOString().split('T')[0]}.csv`);
+      return res.send(csv);
+    } catch (error) {
+      console.error('Error generating report:', error);
+      return res.status(500).json({
+        success: false,
+        statusCode: 500,
+        message: 'Lỗi khi xuất báo cáo thống kê',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
     }
-    
-    switch (period) {
-      case 'day':
-        groupBy = {
-          year: { $year: '$created_at' },
-          month: { $month: '$created_at' },
-          day: { $dayOfMonth: '$created_at' }
-        };
-        break;
-      case 'week':
-        groupBy = {
-          year: { $year: '$created_at' },
-          week: { $week: '$created_at' }
-        };
-        break;
-      case 'month':
-        groupBy = {
-          year: { $year: '$created_at' },
-          month: { $month: '$created_at' }
-        };
-        break;
-      case 'year':
-        groupBy = {
-          year: { $year: '$created_at' }
-        };
-        break;
-    }
-    
-    // Import models
-    const Order = require('../../models/Order');
-    const OrderItem = require('../../models/OrderItem');
-    const User = require('../../models/User');
-    const Product = require('../../models/Product');
-    
-    // Revenue data
-    const revenueByTime = await Order.aggregate([
-      { $match: { ...dateFilter, status: 'completed' } },
-      {
-        $group: {
-          _id: groupBy,
-          totalRevenue: { $sum: '$total_amount' },
-          totalOrders: { $sum: 1 },
-          averageOrderValue: { $avg: '$total_amount' }
-        }
-      },
-      { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } }
-    ]);
-
-    // Add revenue data to report
-    revenueByTime.forEach((item) => {
-      reportData.push({
-        section: 'Revenue Statistics',
-        metric: `totalRevenue: ${item.totalRevenue || 0}, period: ${item._id ? `${item._id.year}-${item._id.month || item._id.week || item._id.day || ''}` : 'N/A'}, orders: ${item.totalOrders || 0}`,
-      });
-    });
-
-    // Top selling items data
-    const topItems = await OrderItem.aggregate([
-      {
-        $lookup: {
-          from: 'orders',
-          localField: 'order_id',
-          foreignField: '_id',
-          as: 'order'
-        }
-      },
-      { $unwind: '$order' },
-      { $match: { 'order.status': 'completed' } },
-      {
-        $group: {
-          _id: {
-            pet_id: '$pet_id',
-            product_id: '$product_id',
-            variant_id: '$variant_id'
-          },
-          totalQuantity: { $sum: '$quantity' },
-          totalRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] } }
-        }
-      },
-      { $sort: { totalQuantity: -1 } },
-      { $limit: 10 }
-    ]);
-
-    // Add top selling data to report
-    topItems.forEach((item, index) => {
-      reportData.push({
-        section: 'Top Selling Items',
-        metric: `rank: ${index + 1}, quantity: ${item.totalQuantity || 0}, revenue: ${item.totalRevenue || 0}, type: ${item._id.variant_id ? 'variant' : item._id.pet_id ? 'pet' : 'product'}`,
-      });
-    });
-
-    // Order status data
-    const statusStats = await Order.aggregate([
-      { $match: dateFilter },
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 },
-          totalValue: { $sum: '$total_amount' }
-        }
-      },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Add order status data to report
-    statusStats.forEach((status) => {
-      reportData.push({
-        section: 'Order Status',
-        metric: `status: ${status._id || 'N/A'}, count: ${status.count || 0}, totalValue: ${status.totalValue || 0}`,
-      });
-    });
-
-    // Customer statistics
-    const totalCustomers = await User.countDocuments({ role: 'User' });
-    const newCustomers = await User.countDocuments({ 
-      role: 'User', 
-      ...dateFilter 
-    });
-
-    reportData.push({
-      section: 'Customer Statistics',
-      metric: `totalCustomers: ${totalCustomers}, newCustomers: ${newCustomers}`,
-    });
-
-    return reportData;
-
-  } catch (error) {
-    console.error('Error generating report data:', error);
-    throw error;
   }
-}
 
-  // ===== 1. THỐNG KÊ DOANH THU THEO NGÀY =====
-  async getDailyStatistics(req, res) {
+  // Cách 2: Tạo helper method để generate data mà không cần res
+  async generateReportData(req) {
+    const reportData = [];
+
     try {
-      const { startDate, endDate, limit = 30 } = req.query;
-      
-      // Mặc định lấy 30 ngày gần nhất nếu không có filter
-      const endDateFilter = endDate ? new Date(endDate) : new Date();
-      const startDateFilter = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      
-      console.log('📅 Getting daily statistics from', startDateFilter, 'to', endDateFilter);
-      
-      const dailyStats = await Order.aggregate([
-        {
-          $match: {
-            created_at: { $gte: startDateFilter, $lte: endDateFilter },
-            status: { $in: ['completed', 'delivered'] }
+      // Revenue Statistics - Gọi trực tiếp aggregation
+      let { startDate, endDate, period = 'month', filter } = req.query;
+
+      // Apply preset filter if provided
+      if (filter) {
+        const dateRange = this.calculateDateRange(filter);
+        if (dateRange.startDate) {
+          startDate = dateRange.startDate.toISOString();
+          endDate = dateRange.endDate.toISOString();
+        }
+      }
+
+      let dateFilter = {};
+      let groupBy = {};
+
+      if (startDate && endDate) {
+        dateFilter = {
+          created_at: {
+            $gte: new Date(startDate),
+            $lte: new Date(endDate)
           }
-        },
+        };
+      }
+
+      switch (period) {
+        case 'day':
+          groupBy = {
+            year: { $year: '$created_at' },
+            month: { $month: '$created_at' },
+            day: { $dayOfMonth: '$created_at' }
+          };
+          break;
+        case 'week':
+          groupBy = {
+            year: { $year: '$created_at' },
+            week: { $week: '$created_at' }
+          };
+          break;
+        case 'month':
+          groupBy = {
+            year: { $year: '$created_at' },
+            month: { $month: '$created_at' }
+          };
+          break;
+        case 'year':
+          groupBy = {
+            year: { $year: '$created_at' }
+          };
+          break;
+      }
+
+      // Import models
+      const Order = require('../../models/Order');
+      const OrderItem = require('../../models/OrderItem');
+      const User = require('../../models/User');
+      const Product = require('../../models/Product');
+
+      // Revenue data
+      const revenueByTime = await Order.aggregate([
+        { $match: { ...dateFilter, status: 'completed' } },
         {
           $group: {
-            _id: {
-              year: { $year: '$created_at' },
-              month: { $month: '$created_at' },
-              day: { $dayOfMonth: '$created_at' },
-              dayOfWeek: { $dayOfWeek: '$created_at' }
-            },
+            _id: groupBy,
             totalRevenue: { $sum: '$total_amount' },
             totalOrders: { $sum: 1 },
-            averageOrderValue: { $avg: '$total_amount' },
-            totalCustomers: { $addToSet: '$user_id' }
+            averageOrderValue: { $avg: '$total_amount' }
           }
         },
-        {
-          $addFields: {
-            date: {
-              $dateFromParts: {
-                year: '$_id.year',
-                month: '$_id.month',
-                day: '$_id.day'
-              }
-            },
-            dayName: {
-              $switch: {
-                branches: [
-                  { case: { $eq: ['$_id.dayOfWeek', 1] }, then: 'Chủ nhật' },
-                  { case: { $eq: ['$_id.dayOfWeek', 2] }, then: 'Thứ 2' },
-                  { case: { $eq: ['$_id.dayOfWeek', 3] }, then: 'Thứ 3' },
-                  { case: { $eq: ['$_id.dayOfWeek', 4] }, then: 'Thứ 4' },
-                  { case: { $eq: ['$_id.dayOfWeek', 5] }, then: 'Thứ 5' },
-                  { case: { $eq: ['$_id.dayOfWeek', 6] }, then: 'Thứ 6' },
-                  { case: { $eq: ['$_id.dayOfWeek', 7] }, then: 'Thứ 7' }
-                ],
-                default: 'N/A'
-              }
-            },
-            uniqueCustomers: { $size: '$totalCustomers' }
-          }
-        },
-        { $sort: { date: -1 } },
-        { $limit: parseInt(limit) }
+        { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } }
       ]);
-      
-      // Thống kê items bán ra theo ngày
-      const dailyItemStats = await OrderItem.aggregate([
+
+      // Add revenue data to report
+      revenueByTime.forEach((item) => {
+        reportData.push({
+          section: 'Revenue Statistics',
+          metric: `totalRevenue: ${item.totalRevenue || 0}, period: ${item._id ? `${item._id.year}-${item._id.month || item._id.week || item._id.day || ''}` : 'N/A'}, orders: ${item.totalOrders || 0}`,
+        });
+      });
+
+      // Top selling items data
+      const topItems = await OrderItem.aggregate([
         {
           $lookup: {
             from: 'orders',
@@ -2836,552 +2868,72 @@ async generateReportData(req) {
           }
         },
         { $unwind: '$order' },
-        {
-          $match: {
-            'order.created_at': { $gte: startDateFilter, $lte: endDateFilter },
-            'order.status': { $in: ['completed', 'delivered'] }
-          }
-        },
+        { $match: { 'order.status': 'completed' } },
         {
           $group: {
             _id: {
-              year: { $year: '$order.created_at' },
-              month: { $month: '$order.created_at' },
-              day: { $dayOfMonth: '$order.created_at' }
+              pet_id: '$pet_id',
+              product_id: '$product_id',
+              variant_id: '$variant_id'
             },
-            totalItems: { $sum: '$quantity' },
-            uniqueProducts: { $addToSet: { 
-              pet_id: '$pet_id', 
-              product_id: '$product_id', 
-              variant_id: '$variant_id' 
-            }},
-            petsSold: { $sum: { $cond: [{ $ne: ['$pet_id', null] }, '$quantity', 0] }},
-            productsSold: { $sum: { $cond: [{ $ne: ['$product_id', null] }, '$quantity', 0] }},
-            variantsSold: { $sum: { $cond: [{ $ne: ['$variant_id', null] }, '$quantity', 0] }}
+            totalQuantity: { $sum: '$quantity' },
+            totalRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] } }
           }
         },
-        {
-          $addFields: {
-            date: {
-              $dateFromParts: {
-                year: '$_id.year',
-                month: '$_id.month',
-                day: '$_id.day'
-              }
-            },
-            uniqueProductCount: { $size: '$uniqueProducts' }
-          }
-        },
-        { $sort: { date: -1 } }
+        { $sort: { totalQuantity: -1 } },
+        { $limit: 10 }
       ]);
-      
-      // Merge data
-      const mergedStats = dailyStats.map(stat => {
-        const itemStat = dailyItemStats.find(item => 
-          item._id.year === stat._id.year && 
-          item._id.month === stat._id.month && 
-          item._id.day === stat._id.day
-        );
-        
-        return {
-          ...stat,
-          itemStats: itemStat || {
-            totalItems: 0,
-            uniqueProductCount: 0,
-            petsSold: 0,
-            productsSold: 0,
-            variantsSold: 0
-          }
-        };
-      });
-      
-      // Summary
-      const summary = {
-        totalDays: dailyStats.length,
-        totalRevenue: dailyStats.reduce((sum, day) => sum + day.totalRevenue, 0),
-        totalOrders: dailyStats.reduce((sum, day) => sum + day.totalOrders, 0),
-        averageDailyRevenue: dailyStats.length > 0 ? 
-          dailyStats.reduce((sum, day) => sum + day.totalRevenue, 0) / dailyStats.length : 0,
-        bestDay: dailyStats.length > 0 ? 
-          dailyStats.reduce((best, current) => 
-            current.totalRevenue > best.totalRevenue ? current : best
-          ) : null,
-        worstDay: dailyStats.length > 0 ? 
-          dailyStats.reduce((worst, current) => 
-            current.totalRevenue < worst.totalRevenue ? current : worst
-          ) : null
-      };
-      
-      console.log('✅ Daily statistics completed:', {
-        days: dailyStats.length,
-        totalRevenue: summary.totalRevenue,
-        avgDaily: summary.averageDailyRevenue
-      });
-      
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Daily statistics retrieved successfully',
-        data: {
-          dailyStats: mergedStats,
-          summary,
-          period: {
-            from: startDateFilter.toISOString().split('T')[0],
-            to: endDateFilter.toISOString().split('T')[0],
-            days: dailyStats.length
-          }
-        }
-      });
-      
-    } catch (error) {
-      console.error('❌ Daily statistics error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-        data: null
-      });
-    }
-  }
 
-  // ===== 2. THỐNG KÊ THEO THÁNG =====
-  async getMonthlyStatistics(req, res) {
-    try {
-      const { year, months = 12 } = req.query;
-      const currentYear = year ? parseInt(year) : new Date().getFullYear();
-      
-      console.log('📊 Getting monthly statistics for year:', currentYear);
-      
-      const monthlyStats = await Order.aggregate([
-        {
-          $match: {
-            created_at: {
-              $gte: new Date(`${currentYear}-01-01`),
-              $lte: new Date(`${currentYear}-12-31T23:59:59.999Z`)
-            },
-            status: { $in: ['completed', 'delivered'] }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              year: { $year: '$created_at' },
-              month: { $month: '$created_at' }
-            },
-            totalRevenue: { $sum: '$total_amount' },
-            totalOrders: { $sum: 1 },
-            averageOrderValue: { $avg: '$total_amount' },
-            uniqueCustomers: { $addToSet: '$user_id' },
-            maxOrderValue: { $max: '$total_amount' },
-            minOrderValue: { $min: '$total_amount' }
-          }
-        },
-        {
-          $addFields: {
-            monthName: {
-              $switch: {
-                branches: [
-                  { case: { $eq: ['$_id.month', 1] }, then: 'Tháng 1' },
-                  { case: { $eq: ['$_id.month', 2] }, then: 'Tháng 2' },
-                  { case: { $eq: ['$_id.month', 3] }, then: 'Tháng 3' },
-                  { case: { $eq: ['$_id.month', 4] }, then: 'Tháng 4' },
-                  { case: { $eq: ['$_id.month', 5] }, then: 'Tháng 5' },
-                  { case: { $eq: ['$_id.month', 6] }, then: 'Tháng 6' },
-                  { case: { $eq: ['$_id.month', 7] }, then: 'Tháng 7' },
-                  { case: { $eq: ['$_id.month', 8] }, then: 'Tháng 8' },
-                  { case: { $eq: ['$_id.month', 9] }, then: 'Tháng 9' },
-                  { case: { $eq: ['$_id.month', 10] }, then: 'Tháng 10' },
-                  { case: { $eq: ['$_id.month', 11] }, then: 'Tháng 11' },
-                  { case: { $eq: ['$_id.month', 12] }, then: 'Tháng 12' }
-                ],
-                default: 'N/A'
-              }
-            },
-            uniqueCustomerCount: { $size: '$uniqueCustomers' }
-          }
-        },
-        { $sort: { '_id.month': 1 } }
-      ]);
-      
-      // Thống kê chi tiết items theo tháng
-      const monthlyItemStats = await OrderItem.aggregate([
-        {
-          $lookup: {
-            from: 'orders',
-            localField: 'order_id',
-            foreignField: '_id',
-            as: 'order'
-          }
-        },
-        { $unwind: '$order' },
-        {
-          $match: {
-            'order.created_at': {
-              $gte: new Date(`${currentYear}-01-01`),
-              $lte: new Date(`${currentYear}-12-31T23:59:59.999Z`)
-            },
-            'order.status': { $in: ['completed', 'delivered'] }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              year: { $year: '$order.created_at' },
-              month: { $month: '$order.created_at' }
-            },
-            totalItems: { $sum: '$quantity' },
-            totalItemRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] }},
-            petsSold: { $sum: { $cond: [{ $ne: ['$pet_id', null] }, '$quantity', 0] }},
-            productsSold: { $sum: { $cond: [{ $ne: ['$product_id', null] }, '$quantity', 0] }},
-            variantsSold: { $sum: { $cond: [{ $ne: ['$variant_id', null] }, '$quantity', 0] }},
-            avgItemPrice: { $avg: '$unit_price' }
-          }
-        },
-        { $sort: { '_id.month': 1 } }
-      ]);
-      
-      // Lấy tháng trước để so sánh
-      const previousYearStats = await Order.aggregate([
-        {
-          $match: {
-            created_at: {
-              $gte: new Date(`${currentYear - 1}-01-01`),
-              $lte: new Date(`${currentYear - 1}-12-31T23:59:59.999Z`)
-            },
-            status: { $in: ['completed', 'delivered'] }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              month: { $month: '$created_at' }
-            },
-            totalRevenue: { $sum: '$total_amount' },
-            totalOrders: { $sum: 1 }
-          }
-        }
-      ]);
-      
-      // Merge và tính growth
-      const enrichedStats = monthlyStats.map(stat => {
-        const itemStat = monthlyItemStats.find(item => 
-          item._id.month === stat._id.month
-        );
-        
-        const previousStat = previousYearStats.find(prev => 
-          prev._id.month === stat._id.month
-        );
-        
-        const revenueGrowth = previousStat ? 
-          ((stat.totalRevenue - previousStat.totalRevenue) / previousStat.totalRevenue * 100) : 0;
-        
-        const orderGrowth = previousStat ? 
-          ((stat.totalOrders - previousStat.totalOrders) / previousStat.totalOrders * 100) : 0;
-        
-        return {
-          ...stat,
-          itemStats: itemStat || {
-            totalItems: 0,
-            petsSold: 0,
-            productsSold: 0,
-            variantsSold: 0,
-            totalItemRevenue: 0,
-            avgItemPrice: 0
-          },
-          growth: {
-            revenueGrowth: Math.round(revenueGrowth * 100) / 100,
-            orderGrowth: Math.round(orderGrowth * 100) / 100,
-            previousYearRevenue: previousStat?.totalRevenue || 0,
-            previousYearOrders: previousStat?.totalOrders || 0
-          }
-        };
+      // Add top selling data to report
+      topItems.forEach((item, index) => {
+        reportData.push({
+          section: 'Top Selling Items',
+          metric: `rank: ${index + 1}, quantity: ${item.totalQuantity || 0}, revenue: ${item.totalRevenue || 0}, type: ${item._id.variant_id ? 'variant' : item._id.pet_id ? 'pet' : 'product'}`,
+        });
       });
-      
-      // Tổng kết năm
-      const yearSummary = {
-        year: currentYear,
-        totalMonths: monthlyStats.length,
-        totalRevenue: monthlyStats.reduce((sum, month) => sum + month.totalRevenue, 0),
-        totalOrders: monthlyStats.reduce((sum, month) => sum + month.totalOrders, 0),
-        averageMonthlyRevenue: monthlyStats.length > 0 ? 
-          monthlyStats.reduce((sum, month) => sum + month.totalRevenue, 0) / monthlyStats.length : 0,
-        bestMonth: monthlyStats.length > 0 ? 
-          monthlyStats.reduce((best, current) => 
-            current.totalRevenue > best.totalRevenue ? current : best
-          ) : null,
-        worstMonth: monthlyStats.length > 0 ? 
-          monthlyStats.reduce((worst, current) => 
-            current.totalRevenue < worst.totalRevenue ? current : worst
-          ) : null,
-        totalItems: enrichedStats.reduce((sum, month) => sum + (month.itemStats?.totalItems || 0), 0)
-      };
-      
-      console.log('✅ Monthly statistics completed:', {
-        year: currentYear,
-        months: monthlyStats.length,
-        totalRevenue: yearSummary.totalRevenue
-      });
-      
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Monthly statistics retrieved successfully',
-        data: {
-          monthlyStats: enrichedStats,
-          yearSummary,
-          metadata: {
-            year: currentYear,
-            previousYear: currentYear - 1,
-            hasGrowthComparison: previousYearStats.length > 0
-          }
-        }
-      });
-      
-    } catch (error) {
-      console.error('❌ Monthly statistics error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-        data: null
-      });
-    }
-  }
 
-  // ===== 3. THỐNG KÊ THEO NĂM =====
-  async getYearlyStatistics(req, res) {
-    try {
-      const { startYear, endYear, limit = 5 } = req.query;
-      const currentYear = new Date().getFullYear();
-      const fromYear = startYear ? parseInt(startYear) : currentYear - parseInt(limit) + 1;
-      const toYear = endYear ? parseInt(endYear) : currentYear;
-      
-      console.log('📈 Getting yearly statistics from', fromYear, 'to', toYear);
-      
-      const yearlyStats = await Order.aggregate([
-        {
-          $match: {
-            created_at: {
-              $gte: new Date(`${fromYear}-01-01`),
-              $lte: new Date(`${toYear}-12-31T23:59:59.999Z`)
-            },
-            status: { $in: ['completed', 'delivered'] }
-          }
-        },
+      // Order status data
+      const statusStats = await Order.aggregate([
+        { $match: dateFilter },
         {
           $group: {
-            _id: {
-              year: { $year: '$created_at' }
-            },
-            totalRevenue: { $sum: '$total_amount' },
-            totalOrders: { $sum: 1 },
-            averageOrderValue: { $avg: '$total_amount' },
-            uniqueCustomers: { $addToSet: '$user_id' },
-            maxOrderValue: { $max: '$total_amount' },
-            minOrderValue: { $min: '$total_amount' },
-            ordersByMonth: {
-              $push: {
-                month: { $month: '$created_at' },
-                amount: '$total_amount'
-              }
-            }
+            _id: '$status',
+            count: { $sum: 1 },
+            totalValue: { $sum: '$total_amount' }
           }
         },
-        {
-          $addFields: {
-            uniqueCustomerCount: { $size: '$uniqueCustomers' },
-            customerRetentionRate: {
-              $multiply: [
-                { $divide: [{ $size: '$uniqueCustomers' }, '$totalOrders'] },
-                100
-              ]
-            }
-          }
-        },
-        { $sort: { '_id.year': -1 } }
+        { $sort: { count: -1 } }
       ]);
-      
-      // Thống kê items theo năm
-      const yearlyItemStats = await OrderItem.aggregate([
-        {
-          $lookup: {
-            from: 'orders',
-            localField: 'order_id',
-            foreignField: '_id',
-            as: 'order'
-          }
-        },
-        { $unwind: '$order' },
-        {
-          $match: {
-            'order.created_at': {
-              $gte: new Date(`${fromYear}-01-01`),
-              $lte: new Date(`${toYear}-12-31T23:59:59.999Z`)
-            },
-            'order.status': { $in: ['completed', 'delivered'] }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              year: { $year: '$order.created_at' }
-            },
-            totalItems: { $sum: '$quantity' },
-            totalItemRevenue: { $sum: { $multiply: ['$quantity', '$unit_price'] }},
-            petsSold: { $sum: { $cond: [{ $ne: ['$pet_id', null] }, '$quantity', 0] }},
-            productsSold: { $sum: { $cond: [{ $ne: ['$product_id', null] }, '$quantity', 0] }},
-            variantsSold: { $sum: { $cond: [{ $ne: ['$variant_id', null] }, '$quantity', 0] }},
-            avgItemPrice: { $avg: '$unit_price' },
-            uniqueItems: {
-              $addToSet: {
-                pet_id: '$pet_id',
-                product_id: '$product_id', 
-                variant_id: '$variant_id'
-              }
-            }
-          }
-        },
-        {
-          $addFields: {
-            uniqueItemCount: { $size: '$uniqueItems' }
-          }
-        },
-        { $sort: { '_id.year': -1 } }
-      ]);
-      
-      // Thống kê khách hàng mới theo năm
-      const yearlyCustomerStats = await User.aggregate([
-        {
-          $match: {
-            role: 'User',
-            created_at: {
-              $gte: new Date(`${fromYear}-01-01`),
-              $lte: new Date(`${toYear}-12-31T23:59:59.999Z`)
-            }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              year: { $year: '$created_at' }
-            },
-            newCustomers: { $sum: 1 },
-            customersByMonth: {
-              $push: {
-                month: { $month: '$created_at' },
-                count: 1
-              }
-            }
-          }
-        },
-        { $sort: { '_id.year': -1 } }
-      ]);
-      
-      // Merge data và tính growth
-      const enrichedStats = yearlyStats.map((stat, index) => {
-        const itemStat = yearlyItemStats.find(item => 
-          item._id.year === stat._id.year
-        );
-        
-        const customerStat = yearlyCustomerStats.find(customer => 
-          customer._id.year === stat._id.year
-        );
-        
-        // Tính growth so với năm trước
-        const previousYearStat = yearlyStats.find(prev => 
-          prev._id.year === stat._id.year - 1
-        );
-        
-        const revenueGrowth = previousYearStat ? 
-          ((stat.totalRevenue - previousYearStat.totalRevenue) / previousYearStat.totalRevenue * 100) : 0;
-        
-        const orderGrowth = previousYearStat ? 
-          ((stat.totalOrders - previousYearStat.totalOrders) / previousYearStat.totalOrders * 100) : 0;
-        
-        return {
-          ...stat,
-          itemStats: itemStat || {
-            totalItems: 0,
-            petsSold: 0,
-            productsSold: 0,
-            variantsSold: 0,
-            totalItemRevenue: 0,
-            avgItemPrice: 0,
-            uniqueItemCount: 0
-          },
-          customerStats: customerStat || {
-            newCustomers: 0
-          },
-          growth: {
-            revenueGrowth: Math.round(revenueGrowth * 100) / 100,
-            orderGrowth: Math.round(orderGrowth * 100) / 100,
-            previousYear: stat._id.year - 1,
-            previousYearRevenue: previousYearStat?.totalRevenue || 0,
-            previousYearOrders: previousYearStat?.totalOrders || 0
-          }
-        };
+
+      // Add order status data to report
+      statusStats.forEach((status) => {
+        reportData.push({
+          section: 'Order Status',
+          metric: `status: ${status._id || 'N/A'}, count: ${status.count || 0}, totalValue: ${status.totalValue || 0}`,
+        });
       });
-      
-      // Tổng kết nhiều năm
-      const overallSummary = {
-        period: `${fromYear} - ${toYear}`,
-        totalYears: yearlyStats.length,
-        totalRevenue: yearlyStats.reduce((sum, year) => sum + year.totalRevenue, 0),
-        totalOrders: yearlyStats.reduce((sum, year) => sum + year.totalOrders, 0),
-        averageYearlyRevenue: yearlyStats.length > 0 ? 
-          yearlyStats.reduce((sum, year) => sum + year.totalRevenue, 0) / yearlyStats.length : 0,
-        bestYear: yearlyStats.length > 0 ? 
-          yearlyStats.reduce((best, current) => 
-            current.totalRevenue > best.totalRevenue ? current : best
-          ) : null,
-        worstYear: yearlyStats.length > 0 ? 
-          yearlyStats.reduce((worst, current) => 
-            current.totalRevenue < worst.totalRevenue ? current : worst
-          ) : null,
-        totalItems: enrichedStats.reduce((sum, year) => sum + (year.itemStats?.totalItems || 0), 0),
-        totalNewCustomers: enrichedStats.reduce((sum, year) => sum + (year.customerStats?.newCustomers || 0), 0),
-        compoundGrowthRate: yearlyStats.length > 1 ? 
-          Math.pow(yearlyStats[0].totalRevenue / yearlyStats[yearlyStats.length - 1].totalRevenue, 1 / (yearlyStats.length - 1)) - 1 : 0
-      };
-      
-      console.log('✅ Yearly statistics completed:', {
-        years: yearlyStats.length,
-        totalRevenue: overallSummary.totalRevenue,
-        avgYearly: overallSummary.averageYearlyRevenue
+
+      // Customer statistics
+      const totalCustomers = await User.countDocuments({ role: 'User' });
+      const newCustomers = await User.countDocuments({ 
+        role: 'User', 
+        ...dateFilter 
       });
-      
-      res.status(200).json({
-        success: true,
-        statusCode: 200,
-        message: 'Yearly statistics retrieved successfully',
-        data: {
-          yearlyStats: enrichedStats,
-          overallSummary,
-          metadata: {
-            fromYear,
-            toYear,
-            currentYear,
-            hasMultiYearComparison: yearlyStats.length > 1
-          }
-        }
+
+      reportData.push({
+        section: 'Customer Statistics',
+        metric: `totalCustomers: ${totalCustomers}, newCustomers: ${newCustomers}`,
       });
-      
+
+      return reportData;
+
     } catch (error) {
-      console.error('❌ Yearly statistics error:', error);
-      res.status(500).json({
-        success: false,
-        statusCode: 500,
-        message: 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-        data: null
-      });
+      console.error('Error generating report data:', error);
+      throw error;
     }
   }
 
 }
-
 
 const controller = new StatisticsController();
 module.exports = {
@@ -3400,7 +2952,4 @@ module.exports = {
   getDashboardProfitSummary: controller.getDashboardProfitSummary.bind(controller),
   exportStatisticalReport: controller.exportStatisticalReport.bind(controller),
   getBreedTrends: controller.getBreedTrends.bind(controller),
-  getDailyStatistics: controller.getDailyStatistics.bind(controller),
-  getMonthlyStatistics: controller.getMonthlyStatistics.bind(controller),
-  getYearlyStatistics: controller.getYearlyStatistics.bind(controller),
-};
+};    
