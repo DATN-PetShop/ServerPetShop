@@ -9,7 +9,8 @@ const {
   getAppointmentById,
   updateAppointment,
   cancelAppointment,
-  getAvailableSlots
+  getAvailableSlots,
+  getNoShowStatus
 } = require('../controllers/appointmentController');
 
 // Import admin appointment controller
@@ -21,7 +22,7 @@ const {
   getAppointmentsByDate,
   bulkUpdateAppointments,
   assignStaffToAppointment,
-  unassignStaffFromAppointment  
+  unassignStaffFromAppointment,
 } = require('../controllers/Admin/AdminAppointmentController');
 
 // Import admin validation
@@ -40,6 +41,7 @@ router.get('/available-slots', auth, getAvailableSlots);
 // User routes
 router.post('/', auth, createAppointment);
 router.get('/my-appointments', auth, getUserAppointments);
+router.get('/no-show-status', auth, getNoShowStatus);
 router.get('/:id', auth, getAppointmentById);
 router.put('/:id', auth, updateAppointment);
 router.patch('/:id/cancel', auth, cancelAppointment);

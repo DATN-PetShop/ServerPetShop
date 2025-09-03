@@ -1,10 +1,9 @@
-// src/controllers/appointmentController.js - CẬP NHẬT HỖ TRỢ VARIANT với FALLBACK và POPULATE IMAGES
 const Appointment = require('../models/Appointment');
 const CareService = require('../models/CareService');
 const Pet = require('../models/Pet');
 const Order = require('../models/Order');
 const OrderItem = require('../models/OrderItem');
-const Image = require('../models/ImagePet'); // ✅ THÊM IMPORT CHO IMAGES
+const Image = require('../models/ImagePet');
 const { sendAppointmentNotification } = require('../services/notificationService');
 
 class AppointmentController {
@@ -18,11 +17,60 @@ class AppointmentController {
           message: 'Không xác thực được người dùng'
         });
       }
-      const { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount, variant_id, item_type } = req.body;
+ // Thêm: Kiểm tra số lần no-show trong 3 tháng gần nhất
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90); // 3 tháng = 90 ngày
+      const noShowCount = await Appointment.countDocuments({
+        user_id,
+        status: 'no-show',
+        appointment_date: { $gte: threeMonthsAgo }
+      });
+
+      console.log('createAppointment - No-show count for user (last 3 months):', { user_id, noShowCount });
+
+      if (noShowCount >= 3) {
+        if (req.body.payment_method !== 'vnpay') {
+          console.log('createAppointment - Blocked: User has >=3 no-shows in last 3 months, must use vnpay');
+          return res.status(403).json({
+            success: false,
+            message: 'Bạn đã không đến lịch hẹn 3 lần trong 3 tháng qua. Để đặt lịch mới, vui lòng sử dụng thanh toán VNPay.'
+          });
+        }
+        // Nếu dùng vnpay, tiếp tục bình thường
+      }
+
+      const { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount, variant_id, item_type, payment_method, vnpay_transaction_id } = req.body;
 
       // Log request body và user_id
-      console.log('createAppointment - Request body:', { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount, variant_id, item_type });
+      console.log('createAppointment - Request body:', { pet_id, service_id, appointment_date, appointment_time, notes, order_id, total_amount, variant_id, item_type, payment_method, vnpay_transaction_id });
       console.log('createAppointment - Authenticated user_id:', user_id);
+
+      // Kiểm tra các trường bắt buộc
+      if (!pet_id || !service_id || !appointment_date || !appointment_time || !order_id || !total_amount || !payment_method) {
+        console.log('createAppointment - Missing required fields:', { pet_id, service_id, appointment_date, appointment_time, order_id, total_amount, payment_method });
+        return res.status(400).json({
+          success: false,
+          message: 'Thiếu các trường bắt buộc (pet_id, service_id, appointment_date, appointment_time, order_id, total_amount, payment_method)'
+        });
+      }
+
+      // Kiểm tra định dạng payment_method
+      if (!['cod', 'vnpay'].includes(payment_method)) {
+        console.log('createAppointment - Invalid payment_method:', payment_method);
+        return res.status(400).json({
+          success: false,
+          message: 'Phương thức thanh toán phải là "cod" hoặc "vnpay"'
+        });
+      }
+
+      // Kiểm tra vnpay_transaction_id nếu payment_method là vnpay
+      if (payment_method === 'vnpay' && !vnpay_transaction_id) {
+        console.log('createAppointment - Missing vnpay_transaction_id for vnpay payment');
+        return res.status(400).json({
+          success: false,
+          message: 'Vui lòng cung cấp vnpay_transaction_id khi chọn phương thức thanh toán vnpay'
+        });
+      }
 
       // Kiểm tra định dạng appointment_time
       if (!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(appointment_time)) {
@@ -45,13 +93,13 @@ class AppointmentController {
       }
       console.log('createAppointment - Order found:', order);
 
-      // 🔧 CẬP NHẬT: Kiểm tra OrderItem - hỗ trợ cả pet_id và variant_id với FALLBACK
+      // Kiểm tra OrderItem - hỗ trợ cả pet_id và variant_id với FALLBACK
       console.log('createAppointment - Checking order item:', { order_id, pet_id, variant_id, item_type });
       
       let orderItem = null;
       let validatedPetId = pet_id;
 
-      // 🆕 STRATEGY 1: Nếu có variant_id, tìm theo variant_id
+      // STRATEGY 1: Nếu có variant_id, tìm theo variant_id
       if (variant_id && item_type === 'variant') {
         console.log('createAppointment - Looking for variant order item:', { order_id, variant_id });
         
@@ -92,7 +140,7 @@ class AppointmentController {
         }
       }
 
-      // 🆕 STRATEGY 2: Nếu chưa tìm thấy, tìm theo pet_id trực tiếp
+      // STRATEGY 2: Nếu chưa tìm thấy, tìm theo pet_id trực tiếp
       if (!orderItem) {
         console.log('createAppointment - Looking for direct pet order item:', { order_id, pet_id });
         orderItem = await OrderItem.findOne({ 
@@ -101,11 +149,10 @@ class AppointmentController {
         });
       }
 
-      // 🆕 STRATEGY 3: FALLBACK - Tìm variant có pet_id này trong order
+      // STRATEGY 3: FALLBACK - Tìm variant có pet_id này trong order
       if (!orderItem) {
         console.log('createAppointment - Fallback: Looking for any variant with this pet_id in order:', { order_id, pet_id });
         
-        // Tìm tất cả OrderItems có variant_id trong order này
         const variantOrderItems = await OrderItem.find({ 
           order_id: order_id,
           variant_id: { $exists: true, $ne: null }
@@ -119,7 +166,6 @@ class AppointmentController {
 
         console.log('createAppointment - Found variant order items:', variantOrderItems.length);
 
-        // Tìm variant có pet_id khớp
         for (const item of variantOrderItems) {
           if (item.variant_id && item.variant_id.pet_id && 
               item.variant_id.pet_id._id.toString() === pet_id) {
@@ -184,32 +230,34 @@ class AppointmentController {
         });
       }
 
-      // Kiểm tra xem có lịch trùng không
-      console.log('createAppointment - Checking for conflicting appointments:', { appointment_date, appointment_time });
-      const existingAppointment = await Appointment.findOne({
-        appointment_date: new Date(appointment_date),
-        appointment_time,
-        status: { $nin: ['cancelled'] }
+    // Kiểm tra xem có lịch trùng không
+    console.log('createAppointment - Checking for conflicting appointments:', { appointment_date, appointment_time });
+    const existingAppointment = await Appointment.findOne({
+      appointment_date: new Date(appointment_date),
+      appointment_time,
+      status: { $nin: ['cancelled', 'no-show'] } // ✅ Thêm 'no-show' vào danh sách loại trừ
+    });
+    if (existingAppointment) {
+      console.log('createAppointment - Conflicting appointment found:', existingAppointment._id);
+      return res.status(409).json({
+        success: false,
+        message: 'Khung giờ này đã được đặt'
       });
-      if (existingAppointment) {
-        console.log('createAppointment - Conflicting appointment found:', existingAppointment._id);
-        return res.status(409).json({
-          success: false,
-          message: 'Khung giờ này đã được đặt'
-        });
-      }
+    }
 
       // Tạo lịch hẹn
       console.log('createAppointment - Creating new appointment');
       const appointment = new Appointment({
         user_id,
-        pet_id: validatedPetId, // Sử dụng validated pet_id
+        pet_id: validatedPetId,
         service_id,
         order_id,
         appointment_date: new Date(appointment_date),
         appointment_time,
         notes,
-        total_amount: service.price
+        total_amount: service.price,
+        payment_method, // ✅ Thêm payment_method
+        vnpay_transaction_id: payment_method === 'vnpay' ? vnpay_transaction_id : null // ✅ Thêm vnpay_transaction_id nếu có
       });
 
       await appointment.save();
@@ -222,7 +270,7 @@ class AppointmentController {
         .populate('user_id', 'username email')
         .lean();
 
-      // ✅ POPULATE IMAGES CHO PET
+      // POPULATE IMAGES CHO PET
       if (populatedAppointment.pet_id && populatedAppointment.pet_id._id) {
         const petImages = await Image.find({ 
           pet_id: populatedAppointment.pet_id._id 
@@ -270,7 +318,7 @@ class AppointmentController {
     }
   }
 
-  // ✅ UPDATED: Lấy danh sách lịch hẹn của user với IMAGES
+  // Lấy danh sách lịch hẹn của user với IMAGES
   async getUserAppointments(req, res) {
     try {
       const user_id = req.user?.userId;
@@ -300,13 +348,12 @@ class AppointmentController {
         .sort({ appointment_date: -1, appointment_time: -1 })
         .skip(skip)
         .limit(parseInt(limit))
-        .lean(); // ✅ Sử dụng .lean() để có thể modify object
+        .lean();
 
-      // ✅ POPULATE IMAGES CHO MỖI PET
+      // POPULATE IMAGES CHO MỖI PET
       if (appointments && appointments.length > 0) {
         for (let appointment of appointments) {
           if (appointment.pet_id && appointment.pet_id._id) {
-            // Populate pet images
             const petImages = await Image.find({ 
               pet_id: appointment.pet_id._id 
             }).lean();
@@ -344,7 +391,7 @@ class AppointmentController {
     }
   }
 
-  // ✅ UPDATED: Lấy chi tiết lịch hẹn với IMAGES
+  // Lấy chi tiết lịch hẹn với IMAGES
   async getAppointmentById(req, res) {
     try {
       const user_id = req.user?.userId;
@@ -360,7 +407,8 @@ class AppointmentController {
         .populate('pet_id', 'name breed_id age weight gender type')
         .populate('service_id', 'name description price duration category')
         .populate('staff_id', 'username email')
-        .lean(); // ✅ Sử dụng .lean() để có thể modify object
+        .populate('order_id', 'total_amount order_date status')
+        .lean();
 
       if (!appointment) {
         return res.status(404).json({
@@ -369,7 +417,7 @@ class AppointmentController {
         });
       }
 
-      // ✅ POPULATE IMAGES CHO PET
+      // POPULATE IMAGES CHO PET
       if (appointment.pet_id && appointment.pet_id._id) {
         const petImages = await Image.find({ 
           pet_id: appointment.pet_id._id 
@@ -406,7 +454,7 @@ class AppointmentController {
         });
       }
       const { id } = req.params;
-      const { appointment_date, appointment_time, notes } = req.body;
+      const { appointment_date, appointment_time, notes, payment_method, vnpay_transaction_id } = req.body;
 
       const appointment = await Appointment.findOne({ _id: id, user_id });
       if (!appointment) {
@@ -434,6 +482,17 @@ class AppointmentController {
       if (notes !== undefined) {
         appointment.notes = notes;
       }
+      if (payment_method) {
+        if (!['cod', 'vnpay'].includes(payment_method)) {
+          console.log('updateAppointment - Invalid payment_method:', payment_method);
+          return res.status(400).json({
+            success: false,
+            message: 'Phương thức thanh toán phải là "cod" hoặc "vnpay"'
+          });
+        }
+        appointment.payment_method = payment_method;
+        appointment.vnpay_transaction_id = payment_method === 'vnpay' ? vnpay_transaction_id : null;
+      }
 
       await appointment.save();
 
@@ -442,7 +501,7 @@ class AppointmentController {
         .populate('service_id', 'name price duration')
         .lean();
 
-      // ✅ POPULATE IMAGES CHO PET TRONG UPDATE
+      // POPULATE IMAGES CHO PET TRONG UPDATE
       if (updatedAppointment.pet_id && updatedAppointment.pet_id._id) {
         const petImages = await Image.find({ 
           pet_id: updatedAppointment.pet_id._id 
@@ -465,8 +524,6 @@ class AppointmentController {
     }
   }
 
-
-
   // Lấy khung giờ trống
   async getAvailableSlots(req, res) {
     try {
@@ -488,7 +545,7 @@ class AppointmentController {
       // Lấy các lịch hẹn đã đặt trong ngày
       const bookedAppointments = await Appointment.find({
         appointment_date: new Date(date),
-        status: { $nin: ['cancelled'] }
+      status: { $nin: ['cancelled', 'no-show'] } // ✅ Thêm 'no-show'
       }).select('appointment_time');
 
       const bookedSlots = bookedAppointments.map(apt => apt.appointment_time);
@@ -509,6 +566,7 @@ class AppointmentController {
     }
   }
 
+  // Hủy lịch hẹn
   async cancelAppointment(req, res) {
     try {
       const user_id = req.user?.userId;
@@ -541,10 +599,11 @@ class AppointmentController {
         pet: appointment.pet_id?.name,
         service: appointment.service_id?.name,
         date: appointment.appointment_date,
-        time: appointment.appointment_time
+        time: appointment.appointment_time,
+        payment_method: appointment.payment_method
       });
 
-      // ❌ CHÍNH SÁCH HỦY LỊCH: Chỉ cho phép hủy khi status là 'pending'
+      // CHÍNH SÁCH HỦY LỊCH: Chỉ cho phép hủy khi status là 'pending'
       if (appointment.status !== 'pending') {
         console.log('❌ Cannot cancel appointment with status:', appointment.status);
         return res.status(400).json({
@@ -558,7 +617,7 @@ class AppointmentController {
         });
       }
 
-      // ⏰ Kiểm tra thời gian: Không được hủy lịch hẹn trong quá khứ
+      // Kiểm tra thời gian: Không được hủy lịch hẹn trong quá khứ
       const appointmentDateTime = new Date(`${appointment.appointment_date.toISOString().split('T')[0]}T${appointment.appointment_time}`);
       const now = new Date();
       
@@ -570,16 +629,15 @@ class AppointmentController {
         });
       }
 
-      // ⏰ TÙYI CHỌN: Kiểm tra thời gian hủy trước (ví dụ: phải hủy trước 2 giờ)
+      // Kiểm tra thời gian hủy trước (ví dụ: phải hủy trước 2 giờ)
       const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
       if (appointmentDateTime <= twoHoursFromNow) {
         console.log('⚠️ Late cancellation warning:', { appointmentDateTime, twoHoursFromNow });
         // Có thể thêm cảnh báo nhưng vẫn cho phép hủy
-        // hoặc có thể từ chối hủy tùy theo chính sách
         console.log('⚠️ Allowing late cancellation (less than 2 hours notice)');
       }
 
-      // ✅ Thực hiện hủy lịch hẹn
+      // Thực hiện hủy lịch hẹn
       const oldStatus = appointment.status;
       appointment.status = 'cancelled';
       appointment.updated_at = new Date();
@@ -613,7 +671,6 @@ class AppointmentController {
       } catch (err) {
         console.error('Failed to notify user about cancelled appointment:', err);
       }
-
     } catch (error) {
       console.error('❌ Cancel appointment error:', {
         message: error.message,
@@ -629,7 +686,31 @@ class AppointmentController {
       });
     }
   }
+
+  async getNoShowStatus(req, res) {
+  try {
+    const user_id = req.user?.userId;
+    if (!user_id) {
+      return res.status(401).json({ success: false, message: 'Không xác thực được người dùng' });
+    }
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90);
+    const noShowCount = await Appointment.countDocuments({
+      user_id,
+      status: 'no-show',
+      appointment_date: { $gte: threeMonthsAgo }
+    });
+    res.status(200).json({
+      success: true,
+      data: { noShowCount, restricted: noShowCount >= 3 }
+    });
+  } catch (error) {
+    console.error('Get no-show status error:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server' });
+  }
 }
+}
+
 const getStatusCancelMessage = (status) => {
   switch (status) {
     case 'confirmed':
@@ -645,7 +726,6 @@ const getStatusCancelMessage = (status) => {
   }
 };
 
-// Helper function để chuyển đổi status thành text
 const getStatusText = (status) => {
   switch (status) {
     case 'pending':
@@ -662,6 +742,7 @@ const getStatusText = (status) => {
       return status;
   }
 };
+
 const appointmentController = new AppointmentController();
 
 module.exports = {
@@ -670,5 +751,6 @@ module.exports = {
   getAppointmentById: appointmentController.getAppointmentById.bind(appointmentController),
   updateAppointment: appointmentController.updateAppointment.bind(appointmentController),
   cancelAppointment: appointmentController.cancelAppointment.bind(appointmentController),
-  getAvailableSlots: appointmentController.getAvailableSlots.bind(appointmentController)
+  getAvailableSlots: appointmentController.getAvailableSlots.bind(appointmentController),
+  getNoShowStatus: appointmentController.getNoShowStatus.bind(appointmentController)
 };
